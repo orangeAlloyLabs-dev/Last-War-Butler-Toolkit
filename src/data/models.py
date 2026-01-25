@@ -20,7 +20,11 @@ class Player(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     alliance_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    power: Mapped[int] = mapped_column(Integer, default=0)
+    rank: Mapped[int] = mapped_column(Integer, default=1)  # 1-5
+    officer_role: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # Leader, Warlord, Recruiter, Muse, Butler
+    power: Mapped[float] = mapped_column(Float, default=0.0)  # e.g., 145.2 means 145.2M
     level: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
