@@ -1,6 +1,6 @@
 # Last War Butler Toolkit
 
-A Python-based toolkit for Last War alliance management, including a Discord bot, data analytics, and a web dashboard.
+A Python-based toolkit for Last War alliance management, including a Discord bot, data analytics, and a web dashboard. An Orange Alloy Labs production
 
 ## Features
 
