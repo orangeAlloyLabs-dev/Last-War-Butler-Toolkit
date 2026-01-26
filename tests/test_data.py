@@ -1,6 +1,5 @@
 """Tests for data module."""
 
-import pytest
 
 from src.data.models import Alliance, Player, WarResult
 

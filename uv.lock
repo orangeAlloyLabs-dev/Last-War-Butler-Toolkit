@@ -681,6 +681,11 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "ruff" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "discord-py", specifier = ">=2.0" },
@@ -694,6 +699,9 @@ requires-dist = [
     { name = "streamlit", specifier = ">=1.30" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "ruff", specifier = ">=0.14.14" }]
 
 [[package]]
 name = "lazy-loader"

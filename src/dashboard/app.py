@@ -14,7 +14,7 @@ st.markdown("---")
 # Sidebar navigation
 st.sidebar.title("Navigation")
 page = st.sidebar.radio(
-    "Go to", ["Overview", "Players", "Import Members", "War Results", "Analytics"]
+    "Go to", ["Overview", "Players", "Import Members", "Duel VS", "War Results", "Analytics"]
 )
 
 
@@ -347,6 +347,595 @@ elif page == "Import Members":
                 st.balloons()
             except Exception as e:
                 st.error(f"Error importing members: {e}")
+
+elif page == "Duel VS":
+    st.header("Duel VS Tracker")
+
+    import pandas as pd
+
+    from src.data.duel_tracker import (
+        TIER_THRESHOLDS,
+        aggregate_cycle_stats,
+        aggregate_daily_to_weekly,
+        assign_week_to_cycle,
+        create_cycle,
+        create_week,
+        get_all_cycles,
+        get_cycle_report,
+        get_recent_weeks,
+        get_rolling_report,
+        get_text_summary,
+        get_week_daily_breakdown,
+        get_weekly_report,
+        import_daily_simple_csv,
+        import_weekly_csv,
+        set_week_result,
+    )
+    from src.data.models import DUEL_DAY_THEMES
+    from src.data.storage import get_session, init_database
+
+    init_database()
+
+    # Tabs for different views
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+        [
+            "Rolling Report",
+            "Weekly Report",
+            "Cycle Report",
+            "Import Weekly",
+            "Import Daily",
+            "Daily Breakdown",
+            "Manage Weeks",
+        ]
+    )
+
+    with tab1:
+        st.subheader("4-Week Rolling Report")
+
+        rolling = get_rolling_report(weeks=4)
+
+        if rolling:
+            # Filter options
+            col1, col2 = st.columns(2)
+            with col1:
+                tier_filter = st.multiselect(
+                    "Filter by Tier",
+                    ["Core", "Strong", "Standard", "Probation"],
+                    default=["Core", "Strong", "Standard", "Probation"],
+                )
+            with col2:
+                show_inactive = st.checkbox("Show inactive players (0 weeks)", value=False)
+
+            # Filter data
+            filtered = [
+                p
+                for p in rolling
+                if p["tier"] in tier_filter and (show_inactive or p["weeks_participated"] > 0)
+            ]
+
+            if filtered:
+                df = pd.DataFrame(filtered)
+                df = df.rename(
+                    columns={
+                        "player_name": "Player",
+                        "weeks_participated": "Weeks",
+                        "total_weeks": "Total",
+                        "avg_raw_points": "Avg Pts",
+                        "avg_normalized_points": "Avg Norm",
+                        "reliability": "Reliability",
+                        "tier": "Tier",
+                    }
+                )
+                df = df[["Player", "Weeks", "Total", "Avg Pts", "Avg Norm", "Reliability", "Tier"]]
+                df["Reliability"] = (df["Reliability"] * 100).astype(int).astype(str) + "%"
+
+                # Color tiers
+                def tier_color(tier):
+                    colors = {
+                        "Core": "#28a745",
+                        "Strong": "#17a2b8",
+                        "Standard": "#ffc107",
+                        "Probation": "#dc3545",
+                    }
+                    return colors.get(tier, "#6c757d")
+
+                st.dataframe(
+                    df,
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Tier": st.column_config.TextColumn("Tier", width="small"),
+                        "Reliability": st.column_config.TextColumn("Reliability", width="small"),
+                    },
+                )
+
+                # Summary stats
+                st.markdown("---")
+                col1, col2, col3, col4 = st.columns(4)
+                tier_counts = df["Tier"].value_counts()
+                with col1:
+                    st.metric("Core", tier_counts.get("Core", 0))
+                with col2:
+                    st.metric("Strong", tier_counts.get("Strong", 0))
+                with col3:
+                    st.metric("Standard", tier_counts.get("Standard", 0))
+                with col4:
+                    st.metric("Probation", tier_counts.get("Probation", 0))
+            else:
+                st.info("No players match the current filters.")
+        else:
+            st.info("No duel weeks recorded yet. Create a week and import stats to see the report.")
+
+        # Show tier thresholds
+        with st.expander("Tier Thresholds"):
+            for tier, thresholds in TIER_THRESHOLDS.items():
+                rel = thresholds["min_reliability"] * 100
+                norm = thresholds["min_avg_normalized"]
+                st.text(f"{tier}: Reliability >= {rel:.0f}%, Avg Norm >= {norm}")
+
+    with tab2:
+        st.subheader("Weekly Report")
+
+        weeks = get_recent_weeks(count=10)
+        if weeks:
+            week_options = {}
+            for w in weeks:
+                opponent = w.opponent_name or "TBD"
+                result = w.result or "pending"
+                week_options[f"Week {w.week_number}: vs {opponent} ({result})"] = w.id
+            selected_week = st.selectbox("Select Week", list(week_options.keys()))
+
+            if selected_week:
+                week_id = week_options[selected_week]
+                report = get_weekly_report(week_id)
+
+                if "error" not in report:
+                    # Header
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        result = report["result"]
+                        if result:
+                            color = (
+                                "#28a745"
+                                if result == "win"
+                                else "#dc3545"
+                                if result == "loss"
+                                else "#ffc107"
+                            )
+                            st.markdown(
+                                f"**Result:** <span style='color:{color}'>{result.upper()}</span>",
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.markdown("**Result:** Pending")
+                    with col2:
+                        st.metric("Alliance Total", f"{report['alliance_total']:,.0f}")
+                    with col3:
+                        st.metric("Participants", report["player_count"])
+
+                    # Player stats table
+                    if report["players"]:
+                        df = pd.DataFrame(report["players"])
+                        df = df.rename(
+                            columns={
+                                "player_name": "Player",
+                                "raw_points": "Points",
+                                "days_participated": "Days",
+                                "normalized_points": "Normalized",
+                            }
+                        )
+                        df = df[["Player", "Points", "Days", "Normalized"]]
+                        df["Points"] = df["Points"].astype(int)
+                        df["Normalized"] = df["Normalized"].round(1)
+
+                        st.dataframe(df, hide_index=True, use_container_width=True)
+
+                    # Text summary
+                    with st.expander("Text Summary (copy/paste)"):
+                        summary = get_text_summary(week_id)
+                        st.code(summary, language=None)
+        else:
+            st.info("No duel weeks recorded yet.")
+
+    with tab3:
+        st.subheader("Cycle Report (4-Week Performance)")
+
+        cycles = get_all_cycles()
+        if cycles:
+            cycle_options = {
+                f"Cycle {c.cycle_number} (started {c.start_date.strftime('%Y-%m-%d')})": c.id
+                for c in cycles
+            }
+            selected_cycle = st.selectbox(
+                "Select Cycle", list(cycle_options.keys()), key="cycle_report_select"
+            )
+
+            if selected_cycle:
+                cycle_id = cycle_options[selected_cycle]
+                report = get_cycle_report(cycle_id)
+
+                if "error" not in report:
+                    # Header metrics
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Weeks in Cycle", report["week_count"])
+                    with col2:
+                        st.metric("Total Points", f"{report['total_alliance_points']:,.0f}")
+                    with col3:
+                        st.metric("Wins", report["wins"])
+                    with col4:
+                        st.metric("Losses", report["losses"])
+
+                    # Weeks summary
+                    if report["weeks"]:
+                        st.markdown("---")
+                        st.markdown("**Weeks in this Cycle**")
+                        week_data = []
+                        for w in report["weeks"]:
+                            result_str = w["result"].upper() if w["result"] else "Pending"
+                            week_data.append(
+                                {
+                                    "Week": w["week_number"],
+                                    "Opponent": w["opponent_name"] or "TBD",
+                                    "Result": result_str,
+                                    "Points": f"{w['alliance_total']:,.0f}",
+                                }
+                            )
+                        st.dataframe(
+                            pd.DataFrame(week_data),
+                            hide_index=True,
+                            use_container_width=True,
+                        )
+
+                    # Player stats
+                    if report["players"]:
+                        st.markdown("---")
+                        st.markdown("**Player Performance**")
+
+                        player_df = pd.DataFrame(report["players"])
+                        player_df = player_df.rename(
+                            columns={
+                                "player_name": "Player",
+                                "total_points": "Total Pts",
+                                "weeks_participated": "Weeks",
+                                "avg_weekly_points": "Avg/Week",
+                            }
+                        )
+                        player_df = player_df[["Player", "Total Pts", "Weeks", "Avg/Week"]]
+                        player_df["Total Pts"] = player_df["Total Pts"].astype(int)
+
+                        st.dataframe(player_df, hide_index=True, use_container_width=True)
+
+                        # Summary
+                        st.markdown("---")
+                        full_participation = sum(
+                            1
+                            for p in report["players"]
+                            if p["weeks_participated"] == report["week_count"]
+                        )
+                        st.markdown(
+                            f"**{full_participation}/{report['player_count']}** players "
+                            f"participated in all {report['week_count']} weeks"
+                        )
+                    else:
+                        st.info(
+                            "No player stats available. "
+                            "Aggregate cycle stats from the Manage Weeks tab."
+                        )
+                else:
+                    st.error(report["error"])
+        else:
+            st.info(
+                "No cycles created yet. "
+                "Go to the Manage Weeks tab to create a cycle and assign weeks to it."
+            )
+
+    with tab4:
+        st.subheader("Import Weekly Stats")
+        st.markdown("**CSV Format:** `Week,PlayerName,Points,DaysParticipated`")
+
+        weeks = get_recent_weeks(count=10)
+        if not weeks:
+            st.warning("Create a duel week first before importing stats.")
+        else:
+            st.markdown(f"**Available weeks:** {', '.join([str(w.week_number) for w in weeks])}")
+
+            csv_input = st.text_area(
+                "Paste CSV data:",
+                height=200,
+                placeholder="Week,PlayerName,Points,DaysParticipated\n1,DragonSlayer,1200,7\n1,IronFist,1100,6",
+            )
+
+            if st.button("Import Stats", type="primary"):
+                if csv_input.strip():
+                    imported, errors = import_weekly_csv(csv_input.strip())
+                    if errors:
+                        st.error("Import failed:")
+                        for err in errors:
+                            st.text(f"  {err}")
+                    else:
+                        st.success(f"Successfully imported {imported} records!")
+                        st.rerun()
+                else:
+                    st.warning("Please paste CSV data first.")
+
+    with tab5:
+        st.subheader("Import Daily Stats")
+
+        weeks = get_recent_weeks(count=10)
+        if not weeks:
+            st.warning("Create a duel week first before importing stats.")
+        else:
+            # Week and Day selection
+            col1, col2 = st.columns(2)
+            with col1:
+                week_options = {
+                    f"Week {w.week_number}: vs {w.opponent_name or 'TBD'}": w.id for w in weeks
+                }
+                selected_week = st.selectbox(
+                    "Select Week", list(week_options.keys()), key="daily_import_week"
+                )
+            with col2:
+                day_options = {
+                    f"Day {num} - {theme}": num for num, theme in DUEL_DAY_THEMES.items()
+                }
+                selected_day = st.selectbox(
+                    "Select Day", list(day_options.keys()), key="daily_import_day"
+                )
+
+            st.markdown("---")
+            st.markdown("**CSV Format:** `PlayerName,Points`")
+
+            daily_csv_input = st.text_area(
+                "Paste daily CSV data:",
+                height=200,
+                placeholder="PlayerName,Points\nDragonSlayer,200\nIronFist,150\nShadowKnight,180",
+                key="daily_csv_input",
+            )
+
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Import Daily Stats", type="primary"):
+                    if daily_csv_input.strip():
+                        week_id = week_options[selected_week]
+                        day_number = day_options[selected_day]
+                        imported, errors = import_daily_simple_csv(
+                            week_id, day_number, daily_csv_input.strip()
+                        )
+                        if errors:
+                            st.error("Import failed:")
+                            for err in errors:
+                                st.text(f"  {err}")
+                        else:
+                            st.success(f"Imported {imported} records for {selected_day}!")
+                            st.rerun()
+                    else:
+                        st.warning("Please paste CSV data first.")
+
+            with col2:
+                if st.button("Aggregate Daily to Weekly"):
+                    week_id = week_options[selected_week]
+                    count = aggregate_daily_to_weekly(week_id)
+                    if count > 0:
+                        st.success(f"Aggregated {count} players' daily stats to weekly totals!")
+                        st.rerun()
+                    else:
+                        st.info("No daily stats found to aggregate for this week.")
+
+    with tab6:
+        st.subheader("Daily Breakdown")
+
+        weeks = get_recent_weeks(count=10)
+        if weeks:
+            week_options = {
+                f"Week {w.week_number}: vs {w.opponent_name or 'TBD'}": w.id for w in weeks
+            }
+            selected_week = st.selectbox(
+                "Select Week", list(week_options.keys()), key="daily_breakdown_week"
+            )
+
+            if selected_week:
+                week_id = week_options[selected_week]
+                breakdown = get_week_daily_breakdown(week_id)
+
+                if "error" not in breakdown:
+                    # Day totals summary
+                    if breakdown["days"]:
+                        st.markdown("**Daily Totals**")
+                        day_cols = st.columns(6)
+                        for i, day_info in enumerate(breakdown["days"]):
+                            with day_cols[i]:
+                                theme = day_info["theme"] or f"Day {day_info['day_number']}"
+                                st.metric(
+                                    theme,
+                                    f"{day_info['total_points']:,.0f}",
+                                    f"{day_info['participant_count']} players",
+                                )
+
+                        st.markdown("---")
+
+                    # Player breakdown table
+                    if breakdown["players"]:
+                        st.markdown("**Player Scores by Day**")
+
+                        # Build table data
+                        table_data = []
+                        for player in breakdown["players"]:
+                            row = {
+                                "Player": player["player_name"],
+                                "Total": player["total"],
+                                "Days": player["days_participated"],
+                            }
+                            # Add each day's score
+                            for day_num in range(1, 7):
+                                theme = DUEL_DAY_THEMES.get(day_num, f"Day {day_num}")
+                                score = player["days"].get(day_num)
+                                row[theme] = score if score is not None else "-"
+                            table_data.append(row)
+
+                        df = pd.DataFrame(table_data)
+                        st.dataframe(df, hide_index=True, use_container_width=True)
+
+                        # Participation summary
+                        st.markdown("---")
+                        total_players = len(breakdown["players"])
+                        full_week_players = sum(
+                            1 for p in breakdown["players"] if p["days_participated"] == 6
+                        )
+                        st.markdown(
+                            f"**{full_week_players}/{total_players}** players "
+                            "participated all 6 days"
+                        )
+                    else:
+                        st.info(
+                            "No daily stats recorded for this week. "
+                            "Use the Import Daily tab to add data."
+                        )
+                else:
+                    st.error(breakdown["error"])
+        else:
+            st.info("No duel weeks recorded yet.")
+
+    with tab7:
+        st.subheader("Manage Duel Weeks & Cycles")
+
+        # Create new cycle section
+        st.markdown("**Create New Cycle**")
+        col1, col2 = st.columns(2)
+        with col1:
+            new_cycle_num = st.number_input(
+                "Cycle Number", min_value=1, value=1, key="new_cycle_num"
+            )
+        with col2:
+            from datetime import datetime
+
+            new_cycle_date = st.date_input(
+                "Cycle Start Date", value=datetime.now(), key="new_cycle_date"
+            )
+
+        if st.button("Create Cycle"):
+            try:
+                cycle = create_cycle(
+                    cycle_number=int(new_cycle_num),
+                    start_date=datetime.combine(new_cycle_date, datetime.min.time()),
+                )
+                st.success(f"Created Cycle {cycle.cycle_number}!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+        st.markdown("---")
+
+        # Create new week
+        st.markdown("**Create New Week**")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            new_week_num = st.number_input("Week Number", min_value=1, value=1)
+        with col2:
+            new_week_date = st.date_input("Start Date", value=datetime.now())
+        with col3:
+            new_opponent = st.text_input("Opponent Name", placeholder="Enemy Alliance")
+
+        if st.button("Create Week"):
+            try:
+                week = create_week(
+                    week_number=int(new_week_num),
+                    start_date=datetime.combine(new_week_date, datetime.min.time()),
+                    opponent_name=new_opponent if new_opponent else None,
+                )
+                st.success(f"Created Week {week.week_number}!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+        st.markdown("---")
+
+        # Assign weeks to cycles
+        weeks = get_recent_weeks(count=10)
+        cycles = get_all_cycles()
+
+        if weeks and cycles:
+            st.markdown("**Assign Weeks to Cycle**")
+
+            week_options_assign = {
+                f"Week {w.week_number}: vs {w.opponent_name or 'TBD'}": w for w in weeks
+            }
+            selected_week_name = st.selectbox(
+                "Select Week", list(week_options_assign.keys()), key="assign_week"
+            )
+            selected_week_obj = week_options_assign[selected_week_name]
+
+            # Show current cycle assignment
+            current_cycle = "None"
+            if selected_week_obj.cycle_id:
+                for c in cycles:
+                    if c.id == selected_week_obj.cycle_id:
+                        current_cycle = f"Cycle {c.cycle_number}"
+                        break
+            st.markdown(f"**Current cycle:** {current_cycle}")
+
+            cycle_options = {"(None)": None}
+            cycle_options.update({f"Cycle {c.cycle_number}": c.id for c in cycles})
+            new_cycle = st.selectbox(
+                "Assign to Cycle", list(cycle_options.keys()), key="assign_cycle"
+            )
+
+            if st.button("Assign Week to Cycle"):
+                try:
+                    assign_week_to_cycle(selected_week_obj.id, cycle_options[new_cycle])
+                    st.success(f"Assigned {selected_week_name} to {new_cycle}!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+            st.markdown("---")
+
+            # Aggregate cycle stats
+            st.markdown("**Aggregate Cycle Stats**")
+            cycle_agg_options = {f"Cycle {c.cycle_number}": c.id for c in cycles}
+            selected_cycle_agg = st.selectbox(
+                "Select Cycle", list(cycle_agg_options.keys()), key="agg_cycle"
+            )
+
+            if st.button("Aggregate Cycle Stats"):
+                try:
+                    cycle_id = cycle_agg_options[selected_cycle_agg]
+                    count = aggregate_cycle_stats(cycle_id)
+                    if count > 0:
+                        st.success(f"Aggregated stats for {count} players!")
+                        st.rerun()
+                    else:
+                        st.info("No weeks assigned to this cycle yet.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+            st.markdown("---")
+
+        # Update existing week result
+        if weeks:
+            st.markdown("**Update Week Result**")
+            week_options = {
+                f"Week {w.week_number}: vs {w.opponent_name or 'TBD'}": w.id for w in weeks
+            }
+            selected = st.selectbox(
+                "Select Week to Update", list(week_options.keys()), key="update_week"
+            )
+
+            if selected:
+                week_id = week_options[selected]
+                col1, col2 = st.columns(2)
+                with col1:
+                    result = st.selectbox("Result", ["win", "loss", "draw"])
+                with col2:
+                    total = st.number_input("Alliance Total", min_value=0, value=0)
+
+                if st.button("Update Week"):
+                    try:
+                        set_week_result(week_id, result, float(total) if total > 0 else None)
+                        st.success("Week updated!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
 elif page == "War Results":
     st.header("War Results")

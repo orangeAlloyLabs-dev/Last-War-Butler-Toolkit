@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import Base
@@ -29,10 +29,28 @@ def get_engine():
     return create_engine(get_database_url(), echo=False)
 
 
+def run_migrations(engine):
+    """Run database migrations for schema updates."""
+    inspector = inspect(engine)
+
+    # Migration: Add cycle_id column to duel_weeks if it doesn't exist
+    if "duel_weeks" in inspector.get_table_names():
+        columns = [col["name"] for col in inspector.get_columns("duel_weeks")]
+        if "cycle_id" not in columns:
+            with engine.connect() as conn:
+                conn.execute(
+                    text("ALTER TABLE duel_weeks ADD COLUMN cycle_id INTEGER")
+                )
+                conn.commit()
+
+
 def init_database():
     """Initialize the database and create all tables."""
     engine = get_engine()
+    # Create new tables
     Base.metadata.create_all(engine)
+    # Run migrations for existing tables
+    run_migrations(engine)
     return engine
 
 
