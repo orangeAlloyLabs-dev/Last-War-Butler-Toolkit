@@ -356,9 +356,13 @@ def import_daily_csv(csv_content: str, session: Session | None = None) -> tuple[
                     errors.append(f"Row {row_num}: Points cannot be negative")
                     continue
 
-                # Check player exists
+                # Check player exists (active players only)
                 if player_name not in player_name_cache:
-                    player = session.query(Player).filter(Player.name == player_name).first()
+                    player = (
+                        session.query(Player)
+                        .filter(Player.name == player_name, Player.is_active == True)  # noqa: E712
+                        .first()
+                    )
                     player_name_cache[player_name] = player.id if player else None
 
                 if player_name_cache[player_name] is None:
@@ -405,7 +409,8 @@ def import_daily_csv(csv_content: str, session: Session | None = None) -> tuple[
         if unknown_players:
             errors.insert(
                 0,
-                f"Unknown players (add them first): {', '.join(sorted(unknown_players))}",
+                f"Unknown or inactive players (add/reactivate them first): "
+                f"{', '.join(sorted(unknown_players))}",
             )
             return 0, errors
 
@@ -497,9 +502,13 @@ def import_daily_simple_csv(
                     errors.append(f"Row {row_num}: Points cannot be negative")
                     continue
 
-                # Check player exists
+                # Check player exists (active players only)
                 if player_name not in player_name_cache:
-                    player = session.query(Player).filter(Player.name == player_name).first()
+                    player = (
+                        session.query(Player)
+                        .filter(Player.name == player_name, Player.is_active == True)  # noqa: E712
+                        .first()
+                    )
                     player_name_cache[player_name] = player.id if player else None
 
                 if player_name_cache[player_name] is None:
@@ -521,7 +530,8 @@ def import_daily_simple_csv(
         if unknown_players:
             errors.insert(
                 0,
-                f"Unknown players (add them first): {', '.join(sorted(unknown_players))}",
+                f"Unknown or inactive players (add/reactivate them first): "
+                f"{', '.join(sorted(unknown_players))}",
             )
             return 0, errors
 
@@ -889,9 +899,13 @@ def import_weekly_csv(csv_content: str, session: Session | None = None) -> tuple
                     errors.append(f"Row {row_num}: Points cannot be negative")
                     continue
 
-                # Check player exists
+                # Check player exists (active players only)
                 if player_name not in player_name_cache:
-                    player = session.query(Player).filter(Player.name == player_name).first()
+                    player = (
+                        session.query(Player)
+                        .filter(Player.name == player_name, Player.is_active == True)  # noqa: E712
+                        .first()
+                    )
                     player_name_cache[player_name] = player.id if player else None
 
                 if player_name_cache[player_name] is None:
@@ -928,7 +942,8 @@ def import_weekly_csv(csv_content: str, session: Session | None = None) -> tuple
         if unknown_players:
             errors.insert(
                 0,
-                f"Unknown players (import all first): {', '.join(sorted(unknown_players))}",
+                f"Unknown or inactive players (add/reactivate them first): "
+                f"{', '.join(sorted(unknown_players))}",
             )
             return 0, errors
 
@@ -1003,7 +1018,9 @@ def get_weekly_report(week_id: int, session: Session | None = None) -> dict:
             session.close()
 
 
-def get_rolling_report(weeks: int = ROLLING_WEEKS, session: Session | None = None) -> list[dict]:
+def get_rolling_report(
+    weeks: int = ROLLING_WEEKS, active_only: bool = True, session: Session | None = None
+) -> list[dict]:
     """Get rolling report with averages, reliability, and tier for all players."""
     close_session = session is None
     if session is None:
@@ -1018,8 +1035,11 @@ def get_rolling_report(weeks: int = ROLLING_WEEKS, session: Session | None = Non
         week_ids = [w.id for w in recent_weeks]
         total_weeks = len(week_ids)
 
-        # Get all players
-        players = session.query(Player).all()
+        # Get players (active only by default)
+        query = session.query(Player)
+        if active_only:
+            query = query.filter(Player.is_active == True)  # noqa: E712
+        players = query.all()
 
         result = []
         for player in players:
@@ -1193,6 +1213,7 @@ def archive_old_weeks(older_than_weeks: int = ARCHIVE_WEEKS, session: Session | 
 def create_cycle(
     cycle_number: int,
     start_date: datetime,
+    name: str | None = None,
     session: Session | None = None,
 ) -> DuelCycle:
     """Create a new duel cycle."""
@@ -1205,6 +1226,7 @@ def create_cycle(
         cycle = DuelCycle(
             cycle_number=cycle_number,
             start_date=start_date,
+            name=name,
         )
         session.add(cycle)
         session.commit()
@@ -1383,6 +1405,7 @@ def get_cycle_report(cycle_id: int, session: Session | None = None) -> dict:
         return {
             "cycle_id": cycle.id,
             "cycle_number": cycle.cycle_number,
+            "name": cycle.name,
             "start_date": cycle.start_date,
             "weeks": week_info,
             "week_count": len(weeks),

@@ -18,7 +18,10 @@ page = st.sidebar.radio(
 )
 
 
-def get_player_stats():
+ALLIANCE_MEMBER_LIMIT = 100
+
+
+def get_player_stats(active_only: bool = True):
     """Get player statistics from database."""
     try:
         from src.data.models import Player
@@ -26,7 +29,10 @@ def get_player_stats():
 
         init_database()
         with get_session() as session:
-            players = session.query(Player).all()
+            query = session.query(Player)
+            if active_only:
+                query = query.filter(Player.is_active == True)  # noqa: E712
+            players = query.all()
             total_members = len(players)
             total_power = sum(p.power for p in players)
             return {
@@ -38,6 +44,33 @@ def get_player_stats():
             }
     except Exception:
         return {"total_members": 0, "total_power": 0, "players": []}
+
+
+def get_inactive_players():
+    """Get inactive (soft-deleted) players."""
+    try:
+        from src.data.models import Player
+        from src.data.storage import get_session, init_database
+
+        init_database()
+        with get_session() as session:
+            players = session.query(Player).filter(Player.is_active == False).all()  # noqa: E712
+            return [(p.id, p.name, p.rank, p.power) for p in players]
+    except Exception:
+        return []
+
+
+def get_active_member_count():
+    """Get count of active members."""
+    try:
+        from src.data.models import Player
+        from src.data.storage import get_session, init_database
+
+        init_database()
+        with get_session() as session:
+            return session.query(Player).filter(Player.is_active == True).count()  # noqa: E712
+    except Exception:
+        return 0
 
 
 if page == "Overview":
@@ -74,7 +107,11 @@ elif page == "Players":
 
     VALID_OFFICER_ROLES = ["", "Leader", "Warlord", "Recruiter", "Muse", "Butler"]
 
-    stats = get_player_stats()
+    # Show active member count
+    active_count = get_active_member_count()
+    st.metric("Active Members", f"{active_count}/{ALLIANCE_MEMBER_LIMIT}")
+
+    stats = get_player_stats(active_only=True)
 
     if stats["players"]:
         # Create editable dataframe with raw values (not formatted)
@@ -139,36 +176,44 @@ elif page == "Players":
                 mime="text/csv",
             )
 
-        # Delete section
+        # Deactivate section (soft-delete)
         st.markdown("---")
-        st.subheader("Remove Members")
+        st.subheader("Deactivate Members")
+        st.caption(
+            "Deactivated members are removed from the active roster "
+            "but their duel stats are preserved."
+        )
 
-        # Multi-select for deletion
+        # Multi-select for deactivation
         player_options = {
             f"{row['Name']} (R{row['Rank']}, {row['Power']:.1f}M)": row["ID"]
             for _, row in df.iterrows()
         }
         selected = st.multiselect(
-            "Select members to remove:",
+            "Select members to deactivate:",
             options=list(player_options.keys()),
         )
 
         if selected:
-            if st.button(f"Delete {len(selected)} Member(s)", type="secondary"):
+            # Check if this would leave 0 active members
+            remaining = len(df) - len(selected)
+            if remaining < 1:
+                st.warning("Cannot deactivate all members. At least 1 active member must remain.")
+            elif st.button(f"Deactivate {len(selected)} Member(s)", type="secondary"):
                 try:
                     with get_session() as session:
-                        deleted = 0
+                        deactivated = 0
                         for name in selected:
                             player_id = player_options[name]
                             player = session.query(Player).filter(Player.id == player_id).first()
                             if player:
-                                session.delete(player)
-                                deleted += 1
+                                player.is_active = False
+                                deactivated += 1
                         session.commit()
-                    st.success(f"Deleted {deleted} member(s)!")
+                    st.success(f"Deactivated {deactivated} member(s)!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error deleting members: {e}")
+                    st.error(f"Error deactivating members: {e}")
 
         # Quick stats
         st.markdown("---")
@@ -180,11 +225,80 @@ elif page == "Players":
             st.metric("Highest Power", f"{df['Power'].max():.1f}M")
         with col3:
             st.metric("Average Level", f"{df['Level'].mean():.1f}")
-    else:
+
+    # Inactive members section
+    inactive_players = get_inactive_players()
+    if inactive_players:
+        st.markdown("---")
+        with st.expander(f"Inactive Members ({len(inactive_players)})", expanded=False):
+            st.caption("These members have been deactivated. Their duel stats are preserved.")
+
+            inactive_df = pd.DataFrame(
+                inactive_players,
+                columns=["ID", "Name", "Rank", "Power"],
+            )
+            inactive_df = inactive_df.sort_values("Name")
+
+            st.dataframe(
+                inactive_df,
+                column_config={
+                    "ID": st.column_config.NumberColumn("ID", width="small"),
+                    "Name": st.column_config.TextColumn("Player Name"),
+                    "Rank": st.column_config.NumberColumn("Rank", width="small"),
+                    "Power": st.column_config.NumberColumn("Power (M)", format="%.1f"),
+                },
+                hide_index=True,
+                use_container_width=True,
+            )
+
+            # Reactivate section
+            reactivate_options = {
+                f"{row['Name']} (R{row['Rank']}, {row['Power']:.1f}M)": row["ID"]
+                for _, row in inactive_df.iterrows()
+            }
+            selected_reactivate = st.multiselect(
+                "Select members to reactivate:",
+                options=list(reactivate_options.keys()),
+                key="reactivate_select",
+            )
+
+            if selected_reactivate:
+                # Check if reactivating would exceed limit
+                new_total = active_count + len(selected_reactivate)
+                if new_total > ALLIANCE_MEMBER_LIMIT:
+                    st.warning(
+                        f"Cannot reactivate {len(selected_reactivate)} member(s). "
+                        f"Would exceed {ALLIANCE_MEMBER_LIMIT} member limit "
+                        f"({active_count} active + {len(selected_reactivate)} = {new_total})."
+                    )
+                elif st.button(f"Reactivate {len(selected_reactivate)} Member(s)", type="primary"):
+                    try:
+                        with get_session() as session:
+                            reactivated = 0
+                            for name in selected_reactivate:
+                                player_id = reactivate_options[name]
+                                player = (
+                                    session.query(Player).filter(Player.id == player_id).first()
+                                )
+                                if player:
+                                    player.is_active = True
+                                    reactivated += 1
+                            session.commit()
+                        st.success(f"Reactivated {reactivated} member(s)!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error reactivating members: {e}")
+
+    if not stats["players"] and not inactive_players:
         st.info("No players tracked yet. Go to **Import Members** to add your alliance members.")
 
 elif page == "Import Members":
     st.header("Add Members")
+
+    # Show current member count
+    active_count = get_active_member_count()
+    st.metric("Active Members", f"{active_count}/{ALLIANCE_MEMBER_LIMIT}")
+
     st.markdown("Enter member data using comma-separated format for fast entry.")
 
     import pandas as pd
@@ -317,36 +431,47 @@ elif page == "Import Members":
 
         st.markdown(f"**{len(preview_data)} members** ready to import")
 
-        # Import button
-        if st.button("Import Members", type="primary"):
-            try:
-                from src.data.models import Player
-                from src.data.storage import get_session, init_database
+        # Check member limit before import
+        current_active = get_active_member_count()
+        new_total = current_active + len(preview_data)
+        if new_total > ALLIANCE_MEMBER_LIMIT:
+            st.error(
+                f"Cannot import {len(preview_data)} member(s). "
+                f"Would exceed {ALLIANCE_MEMBER_LIMIT} member limit "
+                f"({current_active} active + {len(preview_data)} = {new_total}). "
+                f"You can import up to {ALLIANCE_MEMBER_LIMIT - current_active} more members."
+            )
+        else:
+            # Import button
+            if st.button("Import Members", type="primary"):
+                try:
+                    from src.data.models import Player
+                    from src.data.storage import get_session, init_database
 
-                init_database()
+                    init_database()
 
-                with get_session() as session:
-                    imported = 0
-                    for m in st.session_state["parsed_members"]:
-                        player = Player(
-                            name=m["name"],
-                            rank=m["rank"],
-                            officer_role=m["officer"],
-                            power=m["power"],
-                            level=m["level"],
-                        )
-                        session.add(player)
-                        imported += 1
-                    session.commit()
+                    with get_session() as session:
+                        imported = 0
+                        for m in st.session_state["parsed_members"]:
+                            player = Player(
+                                name=m["name"],
+                                rank=m["rank"],
+                                officer_role=m["officer"],
+                                power=m["power"],
+                                level=m["level"],
+                            )
+                            session.add(player)
+                            imported += 1
+                        session.commit()
 
-                st.success(f"Successfully imported {imported} members!")
-                # Clear session state
-                del st.session_state["parsed_members"]
-                if "parse_errors" in st.session_state:
-                    del st.session_state["parse_errors"]
-                st.balloons()
-            except Exception as e:
-                st.error(f"Error importing members: {e}")
+                    st.success(f"Successfully imported {imported} members!")
+                    # Clear session state
+                    del st.session_state["parsed_members"]
+                    if "parse_errors" in st.session_state:
+                        del st.session_state["parse_errors"]
+                    st.balloons()
+                except Exception as e:
+                    st.error(f"Error importing members: {e}")
 
 elif page == "Duel VS":
     st.header("Duel VS Tracker")
@@ -542,10 +667,13 @@ elif page == "Duel VS":
 
         cycles = get_all_cycles()
         if cycles:
-            cycle_options = {
-                f"Cycle {c.cycle_number} (started {c.start_date.strftime('%Y-%m-%d')})": c.id
-                for c in cycles
-            }
+            cycle_options = {}
+            for c in cycles:
+                label = f"Cycle {c.cycle_number}"
+                if c.name:
+                    label += f": {c.name}"
+                label += f" (started {c.start_date.strftime('%Y-%m-%d')})"
+                cycle_options[label] = c.id
             selected_cycle = st.selectbox(
                 "Select Cycle", list(cycle_options.keys()), key="cycle_report_select"
             )
@@ -555,6 +683,12 @@ elif page == "Duel VS":
                 report = get_cycle_report(cycle_id)
 
                 if "error" not in report:
+                    # Display cycle header with name
+                    cycle_header = f"Cycle {report['cycle_number']}"
+                    if report.get("name"):
+                        cycle_header += f" - {report['name']}"
+                    st.markdown(f"### {cycle_header}")
+
                     # Header metrics
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
@@ -813,13 +947,21 @@ elif page == "Duel VS":
                 "Cycle Start Date", value=datetime.now(), key="new_cycle_date"
             )
 
+        new_cycle_name = st.text_input(
+            "League Name (optional)", placeholder="e.g., Gold League, Diamond League"
+        )
+
         if st.button("Create Cycle"):
             try:
                 cycle = create_cycle(
                     cycle_number=int(new_cycle_num),
                     start_date=datetime.combine(new_cycle_date, datetime.min.time()),
+                    name=new_cycle_name if new_cycle_name.strip() else None,
                 )
-                st.success(f"Created Cycle {cycle.cycle_number}!")
+                cycle_display = f"Cycle {cycle.cycle_number}"
+                if cycle.name:
+                    cycle_display += f" - {cycle.name}"
+                st.success(f"Created {cycle_display}!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error: {e}")
@@ -875,7 +1017,11 @@ elif page == "Duel VS":
             st.markdown(f"**Current cycle:** {current_cycle}")
 
             cycle_options = {"(None)": None}
-            cycle_options.update({f"Cycle {c.cycle_number}": c.id for c in cycles})
+            for c in cycles:
+                label = f"Cycle {c.cycle_number}"
+                if c.name:
+                    label += f": {c.name}"
+                cycle_options[label] = c.id
             new_cycle = st.selectbox(
                 "Assign to Cycle", list(cycle_options.keys()), key="assign_cycle"
             )
@@ -892,7 +1038,12 @@ elif page == "Duel VS":
 
             # Aggregate cycle stats
             st.markdown("**Aggregate Cycle Stats**")
-            cycle_agg_options = {f"Cycle {c.cycle_number}": c.id for c in cycles}
+            cycle_agg_options = {}
+            for c in cycles:
+                label = f"Cycle {c.cycle_number}"
+                if c.name:
+                    label += f": {c.name}"
+                cycle_agg_options[label] = c.id
             selected_cycle_agg = st.selectbox(
                 "Select Cycle", list(cycle_agg_options.keys()), key="agg_cycle"
             )

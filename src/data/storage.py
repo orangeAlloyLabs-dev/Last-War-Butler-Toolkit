@@ -43,6 +43,28 @@ def run_migrations(engine):
                 )
                 conn.commit()
 
+    # Migration: Add name column to duel_cycles if it doesn't exist
+    if "duel_cycles" in inspector.get_table_names():
+        columns = [col["name"] for col in inspector.get_columns("duel_cycles")]
+        if "name" not in columns:
+            with engine.connect() as conn:
+                conn.execute(
+                    text("ALTER TABLE duel_cycles ADD COLUMN name VARCHAR(100)")
+                )
+                conn.commit()
+
+    # Migration: Add is_active column to players if it doesn't exist (default True)
+    if "players" in inspector.get_table_names():
+        columns = [col["name"] for col in inspector.get_columns("players")]
+        if "is_active" not in columns:
+            with engine.connect() as conn:
+                conn.execute(
+                    text("ALTER TABLE players ADD COLUMN is_active BOOLEAN DEFAULT 1")
+                )
+                # Set all existing players to active
+                conn.execute(text("UPDATE players SET is_active = 1 WHERE is_active IS NULL"))
+                conn.commit()
+
 
 def init_database():
     """Initialize the database and create all tables."""
