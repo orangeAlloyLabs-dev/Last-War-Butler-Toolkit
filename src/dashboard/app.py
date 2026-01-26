@@ -108,7 +108,7 @@ elif page == "Players":
             key="player_editor",
         )
 
-        col1, col2 = st.columns([1, 4])
+        col1, col2, col3 = st.columns([1, 1, 3])
 
         with col1:
             if st.button("Save Changes", type="primary"):
@@ -129,6 +129,15 @@ elif page == "Players":
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error saving changes: {e}")
+
+        with col2:
+            csv_data = df.to_csv(index=False)
+            st.download_button(
+                label="Export CSV",
+                data=csv_data,
+                file_name="alliance_members.csv",
+                mime="text/csv",
+            )
 
         # Delete section
         st.markdown("---")
