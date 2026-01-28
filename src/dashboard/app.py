@@ -8,13 +8,176 @@ st.set_page_config(
     layout="wide",
 )
 
+# Custom CSS for dark theme matching HTML mockup
+st.markdown(
+    """
+    <style>
+    /* Main background gradient */
+    .stApp {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    }
+
+    /* Sidebar glassmorphism */
+    [data-testid="stSidebar"] {
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(10px);
+        border-right: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    /* Section title accent bar */
+    .stSubheader, h2 {
+        border-left: 4px solid transparent;
+        border-image: linear-gradient(135deg, #667eea 0%, #764ba2 100%) 1;
+        padding-left: 12px;
+    }
+
+    /* Metric cards styling */
+    [data-testid="stMetric"] {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 16px;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    [data-testid="stMetric"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    }
+
+    [data-testid="stMetricLabel"] {
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    [data-testid="stMetricValue"] {
+        color: #ffffff;
+        font-size: 28px;
+        font-weight: 700;
+    }
+
+    /* Data tables */
+    [data-testid="stDataFrame"] {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+    }
+
+    /* Buttons */
+    .stButton > button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 8px 16px;
+        font-weight: 600;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+    }
+
+    .stButton > button[kind="secondary"] {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    /* Expander styling */
+    .streamlit-expanderHeader {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+    }
+
+    /* Info/Warning/Error boxes */
+    .stAlert {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+    }
+
+    /* Tabs styling */
+    .stTabs [data-baseweb="tab-list"] {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        padding: 4px;
+        gap: 4px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        background: transparent;
+        border-radius: 6px;
+        color: rgba(255, 255, 255, 0.6);
+    }
+
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+
+    /* Select boxes and inputs */
+    .stSelectbox > div > div,
+    .stTextInput > div > div > input,
+    .stTextArea > div > div > textarea,
+    .stNumberInput > div > div > input {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        color: white;
+    }
+
+    /* Multiselect */
+    .stMultiSelect > div > div {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+    }
+
+    /* Progress bars */
+    .stProgress > div > div > div {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    }
+
+    /* Dividers */
+    hr {
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+
+    /* Caption/muted text */
+    .stCaption, small {
+        color: rgba(255, 255, 255, 0.5);
+    }
+
+    /* Download button */
+    .stDownloadButton > button {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("Last War Butler Dashboard")
 st.markdown("---")
 
 # Sidebar navigation
 st.sidebar.title("Navigation")
 page = st.sidebar.radio(
-    "Go to", ["Overview", "Players", "Import Members", "Duel VS", "War Results", "Analytics"]
+    "Go to",
+    [
+        "Overview",
+        "Players",
+        "Player Summary",
+        "Import Members",
+        "Duel VS",
+        "War Results",
+        "Analytics",
+    ],
 )
 
 
@@ -292,6 +455,316 @@ elif page == "Players":
     if not stats["players"] and not inactive_players:
         st.info("No players tracked yet. Go to **Import Members** to add your alliance members.")
 
+elif page == "Player Summary":
+    st.header("Player Summary")
+
+    import pandas as pd
+
+    from src.data.duel_tracker import (
+        TIER_THRESHOLDS,
+        get_player_daily_averages,
+        get_recent_weeks,
+        get_rolling_report,
+    )
+    from src.data.models import DUEL_DAY_THEMES, Player
+    from src.data.storage import get_session, init_database
+
+    init_database()
+
+    # Get active players for selector
+    stats = get_player_stats(active_only=True)
+
+    if not stats["players"]:
+        st.info("No players tracked yet. Go to **Import Members** to add your alliance members.")
+    else:
+        # Player selector dropdown
+        player_options = {}
+        for p_id, p_name, p_rank, p_officer, p_power, p_level in stats["players"]:
+            label = f"{p_name} (R{p_rank}, {p_power:.1f}M)"
+            player_options[label] = p_id
+
+        selected_player_label = st.selectbox(
+            "Select Player", list(player_options.keys()), key="player_summary_select"
+        )
+        selected_player_id = player_options[selected_player_label]
+
+        # Get full player data
+        with get_session() as session:
+            player = session.query(Player).filter(Player.id == selected_player_id).first()
+
+            if player:
+                # === Header Section ===
+                st.markdown("---")
+                col_avatar, col_info = st.columns([1, 4])
+
+                with col_avatar:
+                    # Avatar with initials
+                    initials = "".join(word[0].upper() for word in player.name.split()[:2])
+                    st.markdown(
+                        f"""
+                        <div style="
+                            width: 80px;
+                            height: 80px;
+                            border-radius: 50%;
+                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            color: white;
+                            font-size: 28px;
+                            font-weight: bold;
+                            margin: 10px auto;
+                        ">{initials}</div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                with col_info:
+                    # Player name and ID
+                    st.markdown(f"### {player.name}")
+                    st.caption(f"Database ID: {player.id}")
+
+                    # Status badges
+                    badge_cols = st.columns(4)
+                    with badge_cols[0]:
+                        status_color = "#22c55e" if player.is_active else "#ef4444"
+                        status_text = "Active" if player.is_active else "Inactive"
+                        st.markdown(
+                            f"<span style='background-color:{status_color};color:white;"
+                            f"padding:2px 8px;border-radius:4px;font-size:12px;'>"
+                            f"{status_text}</span>",
+                            unsafe_allow_html=True,
+                        )
+                    with badge_cols[1]:
+                        st.markdown(
+                            f"<span style='background-color:#6c757d;color:white;"
+                            f"padding:2px 8px;border-radius:4px;font-size:12px;'>"
+                            f"R{player.rank}</span>",
+                            unsafe_allow_html=True,
+                        )
+                    with badge_cols[2]:
+                        if player.officer_role:
+                            st.markdown(
+                                f"<span style='background-color:#3b82f6;color:white;"
+                                f"padding:2px 8px;border-radius:4px;font-size:12px;'>"
+                                f"{player.officer_role}</span>",
+                                unsafe_allow_html=True,
+                            )
+                    with badge_cols[3]:
+                        join_date = player.created_at.strftime("%Y-%m-%d")
+                        st.caption(f"Joined: {join_date}")
+
+                # === Stats Grid (4 metrics) ===
+                st.markdown("---")
+                st.subheader("Player Stats")
+
+                # Get tier from rolling report
+                rolling = get_rolling_report(weeks=4)
+                player_rolling = next(
+                    (p for p in rolling if p["player_id"] == selected_player_id), None
+                )
+
+                tier = "Probation"
+                reliability = 0.0
+                weeks_participated = 0
+                total_weeks = 0
+                avg_normalized = 0.0
+                if player_rolling:
+                    tier = player_rolling["tier"]
+                    reliability = player_rolling["reliability"]
+                    weeks_participated = player_rolling["weeks_participated"]
+                    total_weeks = player_rolling["total_weeks"]
+                    avg_normalized = player_rolling["avg_normalized_points"]
+
+                # Tier colors
+                tier_colors = {
+                    "Core": "#22c55e",
+                    "Strong": "#3b82f6",
+                    "Standard": "#eab308",
+                    "Probation": "#ef4444",
+                }
+                tier_color = tier_colors.get(tier, "#6c757d")
+
+                stat_cols = st.columns(4)
+                with stat_cols[0]:
+                    power_str = f"{player.power:.1f}M"
+                    st.metric("Current Power", power_str)
+                with stat_cols[1]:
+                    st.metric("Base Level", f"{player.level}/60")
+                with stat_cols[2]:
+                    st.metric("Alliance Rank", f"R{player.rank}")
+                with stat_cols[3]:
+                    st.markdown(
+                        f"**Performance Tier**<br>"
+                        f"<span style='color:{tier_color};font-size:24px;font-weight:bold;'>"
+                        f"{tier}</span>",
+                        unsafe_allow_html=True,
+                    )
+
+                # === VS Combat Performance Section ===
+                st.markdown("---")
+                st.subheader("VS Combat Performance")
+
+                if player_rolling and weeks_participated > 0:
+                    perf_cols = st.columns(3)
+
+                    # 1. Current Cycle Stats
+                    with perf_cols[0]:
+                        st.markdown("**Current Cycle Stats**")
+                        total_points = player_rolling["avg_raw_points"] * weeks_participated
+                        target_points = 1_000_000  # 1M target per cycle
+                        progress = min(total_points / target_points, 1.0)
+                        met_target = total_points >= target_points
+
+                        st.metric("Total Points", f"{total_points:,.0f}")
+                        st.progress(progress)
+                        status_color = "#22c55e" if met_target else "#eab308"
+                        status_text = "Met" if met_target else "Below"
+                        st.markdown(
+                            f"Target: 1M | "
+                            f"<span style='color:{status_color};'>{status_text}</span>",
+                            unsafe_allow_html=True,
+                        )
+
+                    # 2. Participation Rate
+                    with perf_cols[1]:
+                        st.markdown("**Participation Rate**")
+                        reliability_pct = reliability * 100
+                        st.metric("Reliability", f"{reliability_pct:.0f}%")
+                        st.progress(reliability)
+                        if reliability >= 0.75:
+                            rel_color = "#22c55e"
+                            rel_status = "Excellent"
+                        elif reliability >= 0.50:
+                            rel_color = "#eab308"
+                            rel_status = "Moderate"
+                        else:
+                            rel_color = "#ef4444"
+                            rel_status = "Low"
+                        st.markdown(
+                            f"<span style='color:{rel_color};'>{rel_status}</span> "
+                            f"({weeks_participated}/{total_weeks} weeks)",
+                            unsafe_allow_html=True,
+                        )
+
+                    # 3. Latest Week Performance
+                    with perf_cols[2]:
+                        st.markdown("**4-Week Average**")
+                        st.metric("Avg Points/Week", f"{player_rolling['avg_raw_points']:,.0f}")
+                        st.metric("Avg Normalized", f"{avg_normalized:.1f}")
+                else:
+                    st.info("No VS combat data available for this player in the last 4 weeks.")
+
+                # === Day Performance Section ===
+                st.markdown("---")
+                st.subheader("Day Theme Performance")
+
+                daily_avgs = get_player_daily_averages(selected_player_id, weeks=4)
+
+                if "error" not in daily_avgs and daily_avgs.get("day_averages"):
+                    day_cols = st.columns(6)
+                    for i, (day_num, day_data) in enumerate(daily_avgs["day_averages"].items()):
+                        with day_cols[i]:
+                            theme = day_data["theme"]
+                            avg_pts = day_data["avg_points"]
+                            times = day_data["times_participated"]
+                            total_opp = day_data["total_opportunities"]
+
+                            # Shortened theme names for display
+                            short_themes = {
+                                "Radar Training": "Radar",
+                                "Base Expansion": "Base",
+                                "Age of Science": "Science",
+                                "Train Heroes": "Heroes",
+                                "Total Mobilization": "Mobilize",
+                                "Enemy Buster": "Buster",
+                            }
+                            display_theme = short_themes.get(theme, theme)
+
+                            st.markdown(f"**{display_theme}**")
+                            if avg_pts >= 1_000_000:
+                                pts_str = f"{avg_pts / 1_000_000:.1f}M"
+                            elif avg_pts >= 1_000:
+                                pts_str = f"{avg_pts / 1_000:.0f}K"
+                            else:
+                                pts_str = f"{avg_pts:.0f}"
+                            st.metric("Avg", pts_str, label_visibility="collapsed")
+                            st.caption(f"{times}/{total_opp} weeks")
+                else:
+                    st.info("No daily performance data available.")
+
+                # === Recent Weeks Table ===
+                st.markdown("---")
+                st.subheader("Recent Weeks Performance")
+
+                recent_weeks = get_recent_weeks(count=4)
+                if recent_weeks:
+                    from src.data.models import DuelWeeklyStats
+
+                    week_data = []
+                    for week in recent_weeks:
+                        week_stats = (
+                            session.query(DuelWeeklyStats)
+                            .filter(
+                                DuelWeeklyStats.week_id == week.id,
+                                DuelWeeklyStats.player_id == selected_player_id,
+                            )
+                            .first()
+                        )
+                        if week_stats:
+                            week_data.append(
+                                {
+                                    "Week": f"Week {week.week_number}",
+                                    "Opponent": week.opponent_name or "TBD",
+                                    "Result": (week.result or "pending").upper(),
+                                    "Points": f"{week_stats.raw_points:,.0f}",
+                                    "Days": week_stats.days_participated,
+                                    "Normalized": f"{week_stats.normalized_points:.1f}",
+                                }
+                            )
+                        else:
+                            week_data.append(
+                                {
+                                    "Week": f"Week {week.week_number}",
+                                    "Opponent": week.opponent_name or "TBD",
+                                    "Result": (week.result or "pending").upper(),
+                                    "Points": "-",
+                                    "Days": "-",
+                                    "Normalized": "-",
+                                }
+                            )
+
+                    if week_data:
+                        df = pd.DataFrame(week_data)
+                        st.dataframe(df, hide_index=True, use_container_width=True)
+                    else:
+                        st.info("No recent week data available.")
+                else:
+                    st.info("No duel weeks recorded yet.")
+
+                # === Placeholder Sections (Coming Soon) ===
+                st.markdown("---")
+                st.subheader("Coming Soon")
+
+                placeholder_cols = st.columns(2)
+                with placeholder_cols[0]:
+                    st.info(
+                        "**Resource Donations**\n\n"
+                        "Track alliance resource contributions and donation history."
+                    )
+                    st.info(
+                        "**Rally/Titan Participation**\n\n"
+                        "Monitor participation in rallies and titan battles."
+                    )
+                with placeholder_cols[1]:
+                    st.info(
+                        "**Achievement Badges**\n\n"
+                        "Earn badges for milestones and exceptional performance."
+                    )
+                    st.info(
+                        "**Recent Activity Log**\n\nView recent actions and contributions timeline."
+                    )
+
 elif page == "Import Members":
     st.header("Add Members")
 
@@ -477,6 +950,11 @@ elif page == "Duel VS":
     st.header("Duel VS Tracker")
 
     import pandas as pd
+    import plotly.express as px
+
+    # Performance thresholds for daily breakdown pie charts
+    DAILY_TARGET_THRESHOLD = 7_200_000  # 7.2M - Target Performance
+    DAILY_BELOW_TARGET_THRESHOLD = 3_600_000  # 3.6M - Below Target threshold
 
     from src.data.duel_tracker import (
         TIER_THRESHOLDS,
@@ -485,8 +963,11 @@ elif page == "Duel VS":
         assign_week_to_cycle,
         create_cycle,
         create_week,
+        delete_daily_stats_for_day,
         get_all_cycles,
         get_cycle_report,
+        get_daily_stats_for_day,
+        get_day,
         get_recent_weeks,
         get_rolling_report,
         get_text_summary,
@@ -494,6 +975,8 @@ elif page == "Duel VS":
         get_weekly_report,
         import_daily_simple_csv,
         import_weekly_csv,
+        parse_daily_simple_csv,
+        record_daily_stats,
         set_week_result,
     )
     from src.data.models import DUEL_DAY_THEMES
@@ -557,10 +1040,10 @@ elif page == "Duel VS":
                 # Color tiers
                 def tier_color(tier):
                     colors = {
-                        "Core": "#28a745",
-                        "Strong": "#17a2b8",
-                        "Standard": "#ffc107",
-                        "Probation": "#dc3545",
+                        "Core": "#22c55e",
+                        "Strong": "#3b82f6",
+                        "Standard": "#eab308",
+                        "Probation": "#ef4444",
                     }
                     return colors.get(tier, "#6c757d")
 
@@ -616,16 +1099,16 @@ elif page == "Duel VS":
 
                 if "error" not in report:
                     # Header
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2 = st.columns(2)
                     with col1:
                         result = report["result"]
                         if result:
                             color = (
-                                "#28a745"
+                                "#22c55e"
                                 if result == "win"
-                                else "#dc3545"
+                                else "#ef4444"
                                 if result == "loss"
-                                else "#ffc107"
+                                else "#eab308"
                             )
                             st.markdown(
                                 f"**Result:** <span style='color:{color}'>{result.upper()}</span>",
@@ -634,8 +1117,6 @@ elif page == "Duel VS":
                         else:
                             st.markdown("**Result:** Pending")
                     with col2:
-                        st.metric("Alliance Total", f"{report['alliance_total']:,.0f}")
-                    with col3:
                         st.metric("Participants", report["player_count"])
 
                     # Player stats table
@@ -690,14 +1171,12 @@ elif page == "Duel VS":
                     st.markdown(f"### {cycle_header}")
 
                     # Header metrics
-                    col1, col2, col3, col4 = st.columns(4)
+                    col1, col2, col3 = st.columns(3)
                     with col1:
                         st.metric("Weeks in Cycle", report["week_count"])
                     with col2:
-                        st.metric("Total Points", f"{report['total_alliance_points']:,.0f}")
-                    with col3:
                         st.metric("Wins", report["wins"])
-                    with col4:
+                    with col3:
                         st.metric("Losses", report["losses"])
 
                     # Weeks summary
@@ -712,7 +1191,6 @@ elif page == "Duel VS":
                                     "Week": w["week_number"],
                                     "Opponent": w["opponent_name"] or "TBD",
                                     "Result": result_str,
-                                    "Points": f"{w['alliance_total']:,.0f}",
                                 }
                             )
                         st.dataframe(
@@ -800,7 +1278,7 @@ elif page == "Duel VS":
         if not weeks:
             st.warning("Create a duel week first before importing stats.")
         else:
-            # Week and Day selection
+            # Week and Day selection (shared at top)
             col1, col2 = st.columns(2)
             with col1:
                 week_options = {
@@ -817,44 +1295,177 @@ elif page == "Duel VS":
                     "Select Day", list(day_options.keys()), key="daily_import_day"
                 )
 
-            st.markdown("---")
-            st.markdown("**CSV Format:** `PlayerName,Points`")
+            week_id = week_options[selected_week]
+            day_number = day_options[selected_day]
 
-            daily_csv_input = st.text_area(
-                "Paste daily CSV data:",
-                height=200,
-                placeholder="PlayerName,Points\nDragonSlayer,200\nIronFist,150\nShadowKnight,180",
-                key="daily_csv_input",
-            )
+            # Get the day object and existing stats
+            day = get_day(week_id, day_number)
+            existing_stats = []
+            if day:
+                existing_stats = get_daily_stats_for_day(day.id)
 
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Import Daily Stats", type="primary"):
-                    if daily_csv_input.strip():
-                        week_id = week_options[selected_week]
-                        day_number = day_options[selected_day]
-                        imported, errors = import_daily_simple_csv(
-                            week_id, day_number, daily_csv_input.strip()
-                        )
-                        if errors:
-                            st.error("Import failed:")
-                            for err in errors:
-                                st.text(f"  {err}")
-                        else:
-                            st.success(f"Imported {imported} records for {selected_day}!")
+            has_existing = len(existing_stats) > 0
+
+            # --- Section 1: Existing Records ---
+            with st.expander(
+                f"Existing Records ({len(existing_stats)} players)", expanded=has_existing
+            ):
+                if existing_stats:
+                    import pandas as pd
+
+                    # Create editable dataframe
+                    df = pd.DataFrame(existing_stats)
+                    df = df.rename(columns={"player_name": "Player", "points": "Points"})
+
+                    edited_df = st.data_editor(
+                        df[["Player", "Points"]],
+                        column_config={
+                            "Player": st.column_config.TextColumn("Player", disabled=True),
+                            "Points": st.column_config.NumberColumn(
+                                "Points", min_value=0, format="%.0f"
+                            ),
+                        },
+                        hide_index=True,
+                        use_container_width=True,
+                        key="daily_stats_editor",
+                    )
+
+                    if st.button("Save Changes", key="save_daily_edits"):
+                        # Find changes and update
+                        changes = 0
+                        for idx, row in edited_df.iterrows():
+                            original = existing_stats[idx]
+                            if row["Points"] != original["points"]:
+                                record_daily_stats(
+                                    day_id=day.id,
+                                    player_id=original["player_id"],
+                                    points=row["Points"],
+                                )
+                                changes += 1
+                        if changes > 0:
+                            st.success(f"Updated {changes} record(s)!")
                             st.rerun()
-                    else:
-                        st.warning("Please paste CSV data first.")
+                        else:
+                            st.info("No changes detected.")
+                else:
+                    st.info("No records for this day yet.")
 
-            with col2:
-                if st.button("Aggregate Daily to Weekly"):
-                    week_id = week_options[selected_week]
-                    count = aggregate_daily_to_weekly(week_id)
-                    if count > 0:
-                        st.success(f"Aggregated {count} players' daily stats to weekly totals!")
-                        st.rerun()
-                    else:
-                        st.info("No daily stats found to aggregate for this week.")
+            # --- Section 2: Import New Data ---
+            with st.expander("Import New Data", expanded=not has_existing):
+                st.markdown("**CSV Format:** `PlayerName,Points`")
+
+                daily_csv_input = st.text_area(
+                    "Paste daily CSV data:",
+                    height=150,
+                    placeholder="PlayerName,Points\nDragonSlayer,200\nIronFist,150\nShadowKnight,180",
+                    key="daily_csv_input",
+                )
+
+                # Initialize session state for preview
+                if "import_preview" not in st.session_state:
+                    st.session_state.import_preview = None
+                if "import_preview_key" not in st.session_state:
+                    st.session_state.import_preview_key = None
+
+                # Current key for preview cache
+                preview_key = f"{week_id}_{day_number}_{hash(daily_csv_input)}"
+
+                col_preview, col_confirm = st.columns(2)
+                with col_preview:
+                    if st.button("Preview Import", key="preview_daily_import"):
+                        if daily_csv_input.strip():
+                            records, errors = parse_daily_simple_csv(
+                                week_id, day_number, daily_csv_input.strip()
+                            )
+                            if errors:
+                                st.error("Validation errors:")
+                                for err in errors:
+                                    st.text(f"  {err}")
+                                st.session_state.import_preview = None
+                            else:
+                                st.session_state.import_preview = records
+                                st.session_state.import_preview_key = preview_key
+                        else:
+                            st.warning("Please paste CSV data first.")
+
+                # Show preview comparison if available and still valid
+                if (
+                    st.session_state.import_preview
+                    and st.session_state.import_preview_key == preview_key
+                ):
+                    import pandas as pd
+
+                    preview_records = st.session_state.import_preview
+
+                    # Build comparison table
+                    existing_map = {s["player_name"]: s["points"] for s in existing_stats}
+                    comparison = []
+                    for rec in preview_records:
+                        existing_pts = existing_map.get(rec["player_name"])
+                        change = ""
+                        status = "New"
+                        if existing_pts is not None:
+                            diff = rec["points"] - existing_pts
+                            change = f"{diff:+.0f}" if diff != 0 else "0"
+                            status = "Update" if diff != 0 else "Same"
+                        comparison.append(
+                            {
+                                "Player": rec["player_name"],
+                                "Existing": existing_pts if existing_pts is not None else "-",
+                                "New": rec["points"],
+                                "Change": change if existing_pts is not None else "-",
+                                "Status": status,
+                            }
+                        )
+
+                    st.markdown("**Preview:**")
+                    preview_df = pd.DataFrame(comparison)
+                    st.dataframe(preview_df, hide_index=True, use_container_width=True)
+
+                    with col_confirm:
+                        if st.button("Confirm Import", type="primary", key="confirm_daily_import"):
+                            imported, errors = import_daily_simple_csv(
+                                week_id, day_number, daily_csv_input.strip()
+                            )
+                            if errors:
+                                st.error("Import failed:")
+                                for err in errors:
+                                    st.text(f"  {err}")
+                            else:
+                                st.session_state.import_preview = None
+                                st.success(f"Imported {imported} records for {selected_day}!")
+                                st.rerun()
+
+            # --- Section 3: Clear Day Data ---
+            with st.expander("Clear Day Data", expanded=False):
+                if has_existing and day:
+                    st.warning(
+                        f"This will permanently delete all {len(existing_stats)} records "
+                        f"for Day {day_number}."
+                    )
+                    confirm_text = st.text_input(
+                        f"Type `DELETE {day_number}` to confirm:",
+                        key="confirm_delete_day",
+                    )
+                    if st.button("Delete All Records", type="secondary", key="delete_day_data"):
+                        if confirm_text == f"DELETE {day_number}":
+                            deleted = delete_daily_stats_for_day(day.id)
+                            st.success(f"Deleted {deleted} records for Day {day_number}.")
+                            st.rerun()
+                        else:
+                            st.error(f"Please type exactly: DELETE {day_number}")
+                else:
+                    st.info("No records to delete for this day.")
+
+            # --- Aggregate Button at Bottom ---
+            st.markdown("---")
+            if st.button("Aggregate Daily to Weekly", key="aggregate_daily_weekly"):
+                count = aggregate_daily_to_weekly(week_id)
+                if count > 0:
+                    st.success(f"Aggregated {count} players' daily stats to weekly totals!")
+                    st.rerun()
+                else:
+                    st.info("No daily stats found to aggregate for this week.")
 
     with tab6:
         st.subheader("Daily Breakdown")
@@ -886,29 +1497,131 @@ elif page == "Duel VS":
                                     f"{day_info['participant_count']} players",
                                 )
 
+                        # Performance distribution pie charts
+                        if breakdown["players"]:
+                            st.markdown("**Performance Distribution**")
+                            st.caption(
+                                "Target: ≥7.2M | Below Target: 3.6M to <7.2M | "
+                                "Underperforming: <3.6M"
+                            )
+                            pie_cols = st.columns(6)
+
+                            # Define colors for consistency
+                            perf_colors = {
+                                "Target": "#22c55e",
+                                "Below Target": "#eab308",
+                                "Underperforming": "#ef4444",
+                            }
+
+                            for i, day_info in enumerate(breakdown["days"]):
+                                day_num = day_info["day_number"]
+                                theme = day_info["theme"] or f"Day {day_num}"
+
+                                # Categorize players for this day
+                                target_count = 0
+                                below_target_count = 0
+                                underperforming_count = 0
+
+                                for player in breakdown["players"]:
+                                    score = player["days"].get(day_num)
+                                    if score is not None:
+                                        if score >= DAILY_TARGET_THRESHOLD:
+                                            target_count += 1
+                                        elif score >= DAILY_BELOW_TARGET_THRESHOLD:
+                                            below_target_count += 1
+                                        else:
+                                            underperforming_count += 1
+
+                                with pie_cols[i]:
+                                    # Only show chart if there are participants
+                                    total = (
+                                        target_count + below_target_count + underperforming_count
+                                    )
+                                    if total > 0:
+                                        pie_data = pd.DataFrame(
+                                            {
+                                                "Category": [
+                                                    "Target",
+                                                    "Below Target",
+                                                    "Underperforming",
+                                                ],
+                                                "Count": [
+                                                    target_count,
+                                                    below_target_count,
+                                                    underperforming_count,
+                                                ],
+                                            }
+                                        )
+                                        # Filter out zero values for cleaner chart
+                                        pie_data = pie_data[pie_data["Count"] > 0]
+
+                                        fig = px.pie(
+                                            pie_data,
+                                            values="Count",
+                                            names="Category",
+                                            color="Category",
+                                            color_discrete_map=perf_colors,
+                                            hole=0.3,
+                                        )
+                                        fig.update_layout(
+                                            showlegend=False,
+                                            margin=dict(l=0, r=0, t=25, b=0),
+                                            title=dict(
+                                                text=f"Day {day_num}",
+                                                font=dict(size=12),
+                                                x=0.5,
+                                            ),
+                                            height=180,
+                                        )
+                                        fig.update_traces(
+                                            textposition="inside",
+                                            textinfo="value",
+                                            hovertemplate="%{label}: %{value}<extra></extra>",
+                                        )
+                                        st.plotly_chart(
+                                            fig, use_container_width=True, key=f"pie_day_{day_num}"
+                                        )
+                                    else:
+                                        st.caption(f"Day {day_num}")
+                                        st.caption("No data")
+
+                            # Legend
+                            legend_cols = st.columns(3)
+                            with legend_cols[0]:
+                                st.markdown("🟢 **Target** (≥7.2M)")
+                            with legend_cols[1]:
+                                st.markdown("🟡 **Below Target** (3.6M-7.2M)")
+                            with legend_cols[2]:
+                                st.markdown("🔴 **Underperforming** (<3.6M)")
+
                         st.markdown("---")
 
                     # Player breakdown table
                     if breakdown["players"]:
                         st.markdown("**Player Scores by Day**")
 
-                        # Build table data
+                        # Build table data with numeric values for proper sorting
                         table_data = []
                         for player in breakdown["players"]:
                             row = {
                                 "Player": player["player_name"],
-                                "Total": player["total"],
+                                "Total": float(player["total"]),
                                 "Days": player["days_participated"],
                             }
-                            # Add each day's score
+                            # Add each day's score (0 for missing days)
                             for day_num in range(1, 7):
                                 theme = DUEL_DAY_THEMES.get(day_num, f"Day {day_num}")
                                 score = player["days"].get(day_num)
-                                row[theme] = score if score is not None else "-"
+                                row[theme] = float(score) if score is not None else 0.0
                             table_data.append(row)
 
                         df = pd.DataFrame(table_data)
-                        st.dataframe(df, hide_index=True, use_container_width=True)
+
+                        st.dataframe(
+                            df,
+                            hide_index=True,
+                            use_container_width=True,
+                        )
 
                         # Participation summary
                         st.markdown("---")
@@ -1074,15 +1787,11 @@ elif page == "Duel VS":
 
             if selected:
                 week_id = week_options[selected]
-                col1, col2 = st.columns(2)
-                with col1:
-                    result = st.selectbox("Result", ["win", "loss", "draw"])
-                with col2:
-                    total = st.number_input("Alliance Total", min_value=0, value=0)
+                result = st.selectbox("Result", ["win", "loss", "draw"])
 
                 if st.button("Update Week"):
                     try:
-                        set_week_result(week_id, result, float(total) if total > 0 else None)
+                        set_week_result(week_id, result)
                         st.success("Week updated!")
                         st.rerun()
                     except Exception as e:
