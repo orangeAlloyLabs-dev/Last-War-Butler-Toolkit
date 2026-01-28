@@ -85,7 +85,6 @@ def create_week(
 def set_week_result(
     week_id: int,
     result: str,
-    alliance_total: float | None = None,
     session: Session | None = None,
 ) -> DuelWeek:
     """Set the result for a duel week."""
@@ -100,8 +99,6 @@ def set_week_result(
             raise ValueError(f"Week with id {week_id} not found")
 
         week.result = result.lower()
-        if alliance_total is not None:
-            week.alliance_total = alliance_total
         session.commit()
         session.refresh(week)
         return week
@@ -551,6 +548,160 @@ def import_daily_simple_csv(
             imported += 1
 
         return imported, []
+
+    finally:
+        if close_session:
+            session.close()
+
+
+def get_daily_stats_for_day(day_id: int, session: Session | None = None) -> list[dict]:
+    """Get all stats for a day with player names for editing.
+
+    Returns list of {player_id, player_name, points} sorted by player name.
+    """
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    try:
+        stats = session.query(DuelDailyStats).filter(DuelDailyStats.day_id == day_id).all()
+
+        result = []
+        for stat in stats:
+            player = session.query(Player).filter(Player.id == stat.player_id).first()
+            result.append(
+                {
+                    "player_id": stat.player_id,
+                    "player_name": player.name if player else "Unknown",
+                    "points": stat.points,
+                }
+            )
+
+        # Sort by player name
+        result.sort(key=lambda x: x["player_name"])
+        return result
+    finally:
+        if close_session:
+            session.close()
+
+
+def delete_daily_stats_for_day(day_id: int, session: Session | None = None) -> int:
+    """Delete all daily stats for a specific day.
+
+    Returns count of records deleted.
+    """
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    try:
+        count = session.query(DuelDailyStats).filter(DuelDailyStats.day_id == day_id).delete()
+        session.commit()
+        return count
+    finally:
+        if close_session:
+            session.close()
+
+
+def parse_daily_simple_csv(
+    week_id: int,
+    day_number: int,
+    csv_content: str,
+    session: Session | None = None,
+) -> tuple[list[dict], list[str]]:
+    """Parse and validate CSV without importing.
+
+    Returns (records, errors) where records is list of {player_id, player_name, points}.
+    Use this for preview before actual import.
+    """
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    errors: list[str] = []
+    records: list[dict] = []
+
+    try:
+        # Get or create the day
+        week = session.query(DuelWeek).filter(DuelWeek.id == week_id).first()
+        if not week:
+            return [], [f"Week with id {week_id} not found"]
+
+        day = get_day(week_id, day_number, session=session)
+        if not day:
+            # Auto-create days for the week
+            create_days_for_week(week_id, session=session)
+            day = get_day(week_id, day_number, session=session)
+
+        if not day:
+            return [], [f"Could not create day {day_number} for week {week_id}"]
+
+        reader = csv.DictReader(StringIO(csv_content))
+
+        # Check required columns (strip whitespace from headers)
+        required_cols = {"PlayerName", "Points"}
+        if reader.fieldnames is None:
+            return [], ["CSV has no headers"]
+
+        # Strip whitespace from fieldnames to handle copy/paste issues
+        fieldnames = [f.strip() for f in reader.fieldnames]
+        missing_cols = required_cols - set(fieldnames)
+        if missing_cols:
+            return [], [f"Missing columns: {', '.join(missing_cols)}"]
+
+        # Create mapping from stripped names to original names
+        original_names = {f.strip(): f for f in reader.fieldnames}
+
+        # Validate all data
+        player_name_cache: dict[str, int | None] = {}
+        unknown_players: set[str] = set()
+
+        for row_num, row in enumerate(reader, start=2):
+            try:
+                player_name = row[original_names["PlayerName"]].strip()
+                points = float(row[original_names["Points"]])
+
+                if points < 0:
+                    errors.append(f"Row {row_num}: Points cannot be negative")
+                    continue
+
+                # Check player exists (active players only)
+                if player_name not in player_name_cache:
+                    player = (
+                        session.query(Player)
+                        .filter(Player.name == player_name, Player.is_active == True)  # noqa: E712
+                        .first()
+                    )
+                    player_name_cache[player_name] = player.id if player else None
+
+                if player_name_cache[player_name] is None:
+                    unknown_players.add(player_name)
+                    continue
+
+                records.append(
+                    {
+                        "player_id": player_name_cache[player_name],
+                        "player_name": player_name,
+                        "points": points,
+                    }
+                )
+
+            except ValueError as e:
+                errors.append(f"Row {row_num}: Invalid data format - {e}")
+                continue
+
+        # Report unknown players
+        if unknown_players:
+            errors.insert(
+                0,
+                f"Unknown or inactive players (add/reactivate them first): "
+                f"{', '.join(sorted(unknown_players))}",
+            )
+
+        return records, errors
 
     finally:
         if close_session:
@@ -1009,7 +1160,6 @@ def get_weekly_report(week_id: int, session: Session | None = None) -> dict:
             "start_date": week.start_date,
             "opponent_name": week.opponent_name,
             "result": week.result,
-            "alliance_total": week.alliance_total,
             "player_count": len(player_stats),
             "players": player_stats,
         }
@@ -1151,22 +1301,6 @@ def get_text_summary(week_id: int | None = None, session: Session | None = None)
         else:
             lines.append("No players under minimum threshold.")
 
-        lines.append("")
-
-        # Alliance total
-        lines.append(f"Alliance Total: {report['alliance_total']:,.0f} pts")
-
-        # Compare to previous week
-        prev_weeks = get_recent_weeks(count=2, session=session)
-        if len(prev_weeks) >= 2:
-            # prev_weeks[0] is current, prev_weeks[1] is previous
-            prev_week = prev_weeks[1]
-            if prev_week.alliance_total > 0:
-                diff = report["alliance_total"] - prev_week.alliance_total
-                pct = (diff / prev_week.alliance_total) * 100
-                sign = "+" if diff >= 0 else ""
-                lines.append(f"vs Last Week: {sign}{diff:,.0f} pts ({sign}{pct:.1f}%)")
-
         return "\n".join(lines)
     finally:
         if close_session:
@@ -1174,6 +1308,32 @@ def get_text_summary(week_id: int | None = None, session: Session | None = None)
 
 
 # ============ Archiving ============
+
+
+def clear_all_duel_data(session: Session | None = None) -> dict[str, int]:
+    """Clear all Duel VS data from the database.
+
+    Returns dict with counts of deleted records per table.
+    """
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    try:
+        counts = {}
+        # Delete in order respecting foreign key constraints
+        counts["daily_stats"] = session.query(DuelDailyStats).delete()
+        counts["days"] = session.query(DuelDay).delete()
+        counts["weekly_stats"] = session.query(DuelWeeklyStats).delete()
+        counts["cycle_stats"] = session.query(DuelCycleStats).delete()
+        counts["weeks"] = session.query(DuelWeek).delete()
+        counts["cycles"] = session.query(DuelCycle).delete()
+        session.commit()
+        return counts
+    finally:
+        if close_session:
+            session.close()
 
 
 def archive_old_weeks(older_than_weeks: int = ARCHIVE_WEEKS, session: Session | None = None) -> int:
@@ -1373,7 +1533,6 @@ def get_cycle_report(cycle_id: int, session: Session | None = None) -> dict:
                 "week_number": w.week_number,
                 "opponent_name": w.opponent_name,
                 "result": w.result,
-                "alliance_total": w.alliance_total,
             }
             for w in weeks
         ]
@@ -1398,7 +1557,6 @@ def get_cycle_report(cycle_id: int, session: Session | None = None) -> dict:
         player_stats.sort(key=lambda x: x["total_points"], reverse=True)
 
         # Calculate cycle totals
-        total_alliance_points = sum(w.alliance_total for w in weeks)
         wins = sum(1 for w in weeks if w.result == "win")
         losses = sum(1 for w in weeks if w.result == "loss")
 
@@ -1409,7 +1567,6 @@ def get_cycle_report(cycle_id: int, session: Session | None = None) -> dict:
             "start_date": cycle.start_date,
             "weeks": week_info,
             "week_count": len(weeks),
-            "total_alliance_points": total_alliance_points,
             "wins": wins,
             "losses": losses,
             "player_count": len(player_stats),

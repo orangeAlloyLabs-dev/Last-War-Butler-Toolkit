@@ -96,7 +96,6 @@ class DuelWeek(Base):
     start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     opponent_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     result: Mapped[str | None] = mapped_column(String(10), nullable=True)  # win/loss/draw
-    alliance_total: Mapped[float] = mapped_column(Float, default=0.0)
     cycle_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("duel_cycles.id"), nullable=True
     )

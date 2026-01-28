@@ -100,21 +100,20 @@ def main():
         print("\n2. Creating duel weeks...")
         opponents = ["Alpha Legion", "Dark Knights", "Storm Riders", "Iron Wolves"]
         results = ["win", "loss", "win", "win"]
-        totals = [8500, 7200, 9100, 8800]
 
         base_date = datetime.now() - timedelta(weeks=4)
         week_ids = []
 
-        for i, (opp, res, total) in enumerate(zip(opponents, results, totals), start=1):
+        for i, (opp, res) in enumerate(zip(opponents, results), start=1):
             week = create_week(
                 week_number=i,
                 start_date=base_date + timedelta(weeks=i - 1),
                 opponent_name=opp,
                 session=session,
             )
-            set_week_result(week.id, res, total, session=session)
+            set_week_result(week.id, res, session=session)
             week_ids.append(week.id)
-            print(f"   Week {i}: vs {opp} - {res.upper()} ({total:,} pts)")
+            print(f"   Week {i}: vs {opp} - {res.upper()}")
 
         # 3. Import CSV data
         print("\n3. Importing weekly stats from CSV...")
@@ -136,7 +135,6 @@ def main():
         report = get_weekly_report(week_ids[3], session=session)
         print(f"   Week {report['week_number']} vs {report['opponent_name']}")
         print(f"   Result: {report['result'].upper()}")
-        print(f"   Alliance Total: {report['alliance_total']:,} pts")
         print(f"   Participants: {report['player_count']}")
         print("\n   Player Rankings:")
         for i, p in enumerate(report["players"][:5], 1):

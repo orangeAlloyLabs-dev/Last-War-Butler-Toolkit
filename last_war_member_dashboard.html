@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Last War Alliance Member Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .dashboard {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .member-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .avatar {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            font-weight: bold;
+            color: white;
+            border: 3px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .member-details h1 {
+            color: #fff;
+            font-size: 28px;
+            margin-bottom: 4px;
+        }
+
+        .member-id {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 14px;
+        }
+
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-active {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+            border: 1px solid #22c55e;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        .stat-label {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            color: #fff;
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .stat-subtext {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+        }
+
+        .performance-section {
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            color: #fff;
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-title::before {
+            content: '';
+            width: 4px;
+            height: 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 2px;
+        }
+
+        .performance-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+        }
+
+        .performance-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .performance-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .performance-title {
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-green {
+            background: #22c55e;
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+        }
+
+        .status-yellow {
+            background: #eab308;
+            box-shadow: 0 0 10px rgba(234, 179, 8, 0.5);
+        }
+
+        .status-red {
+            background: #ef4444;
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .metric-label {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+        }
+
+        .metric-value {
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .progress-bar-container {
+            background: rgba(255, 255, 255, 0.1);
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .progress-green {
+            background: linear-gradient(90deg, #22c55e 0%, #16a34a 100%);
+        }
+
+        .progress-yellow {
+            background: linear-gradient(90deg, #eab308 0%, #ca8a04 100%);
+        }
+
+        .progress-red {
+            background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
+        }
+
+        .activity-log {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .activity-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .activity-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+
+        .activity-icon-combat {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .activity-icon-donation {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+
+        .activity-icon-event {
+            background: rgba(168, 85, 247, 0.2);
+            color: #a855f7;
+        }
+
+        .activity-content {
+            flex: 1;
+        }
+
+        .activity-text {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 14px;
+            margin-bottom: 2px;
+        }
+
+        .activity-time {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+        }
+
+        .badges-container {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+
+        .badge {
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 600;
+            border: 1px solid;
+        }
+
+        .badge-mvp {
+            background: rgba(234, 179, 8, 0.2);
+            color: #eab308;
+            border-color: #eab308;
+        }
+
+        .badge-veteran {
+            background: rgba(59, 130, 246, 0.2);
+            color: #3b82f6;
+            border-color: #3b82f6;
+        }
+
+        .badge-contributor {
+            background: rgba(168, 85, 247, 0.2);
+            color: #a855f7;
+            border-color: #a855f7;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <!-- Header Section -->
+        <div class="header">
+            <div class="member-info">
+                <div class="avatar">WK</div>
+                <div class="member-details">
+                    <h1>WarKing_2024</h1>
+                    <div class="member-id">Member ID: LW-45892 • Joined 145 days ago</div>
+                </div>
+            </div>
+            <div class="status-badge status-active">● ACTIVE</div>
+        </div>
+
+        <!-- Main Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Current Power</div>
+                <div class="stat-value">12.8M</div>
+                <div class="stat-subtext">+340K this week</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Base Level</div>
+                <div class="stat-value">34</div>
+                <div class="stat-subtext">Max: 40</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Alliance Rank</div>
+                <div class="stat-value">#8</div>
+                <div class="stat-subtext">of 100 members</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">VS Rating</div>
+                <div class="stat-value">2,847</div>
+                <div class="stat-subtext">Top 5% globally</div>
+            </div>
+        </div>
+
+        <!-- Performance Section -->
+        <div class="performance-section">
+            <h2 class="section-title">Combat Performance</h2>
+            <div class="performance-grid">
+                <div class="performance-card">
+                    <div class="performance-header">
+                        <div class="performance-title">VS Kills (Last 7 Days)</div>
+                        <div class="status-indicator status-green"></div>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Total Kills</span>
+                        <span class="metric-value">8.4M</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar progress-green" style="width: 85%"></div>
+                    </div>
+                    <div class="metric-row" style="margin-top: 12px;">
+                        <span class="metric-label">Target: ≥7.2M</span>
+                        <span class="metric-value" style="color: #22c55e;">✓ Met</span>
+                    </div>
+                </div>
+
+                <div class="performance-card">
+                    <div class="performance-header">
+                        <div class="performance-title">War Participation</div>
+                        <div class="status-indicator status-green"></div>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Battles Attended</span>
+                        <span class="metric-value">12/14</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar progress-green" style="width: 86%"></div>
+                    </div>
+                    <div class="metric-row" style="margin-top: 12px;">
+                        <span class="metric-label">Attendance Rate</span>
+                        <span class="metric-value">86%</span>
+                    </div>
+                </div>
+
+                <div class="performance-card">
+                    <div class="performance-header">
+                        <div class="performance-title">Resource Donations</div>
+                        <div class="status-indicator status-yellow"></div>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">This Week</span>
+                        <span class="metric-value">5.1M</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar progress-yellow" style="width: 55%"></div>
+                    </div>
+                    <div class="metric-row" style="margin-top: 12px;">
+                        <span class="metric-label">Target: ≥7.2M</span>
+                        <span class="metric-value" style="color: #eab308;">⚠ Warning</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Additional Metrics -->
+        <div class="performance-section">
+            <h2 class="section-title">Additional Metrics</h2>
+            <div class="performance-grid">
+                <div class="performance-card">
+                    <div class="metric-row">
+                        <span class="metric-label">Commander Level</span>
+                        <span class="metric-value">58</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Tech Level</span>
+                        <span class="metric-value">45</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Troops Trained (7d)</span>
+                        <span class="metric-value">2.4M</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Resources Gathered</span>
+                        <span class="metric-value">18.6M</span>
+                    </div>
+                </div>
+
+                <div class="performance-card">
+                    <div class="metric-row">
+                        <span class="metric-label">Rally Attendance</span>
+                        <span class="metric-value">23/25</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Titan Damage</span>
+                        <span class="metric-value">1.2M</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Alliance Help</span>
+                        <span class="metric-value">450</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Daily Login Streak</span>
+                        <span class="metric-value">89 days</span>
+                    </div>
+                </div>
+
+                <div class="performance-card">
+                    <div class="performance-title" style="margin-bottom: 12px;">Achievement Badges</div>
+                    <div class="badges-container">
+                        <div class="badge badge-mvp">🏆 VS MVP x3</div>
+                        <div class="badge badge-veteran">⚔️ Veteran</div>
+                        <div class="badge badge-contributor">💎 Top Donor</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="performance-section">
+            <h2 class="section-title">Recent Activity</h2>
+            <div class="activity-log">
+                <div class="activity-item">
+                    <div class="activity-icon activity-icon-combat">⚔️</div>
+                    <div class="activity-content">
+                        <div class="activity-text">Participated in Alliance War - 2.1M kills</div>
+                        <div class="activity-time">2 hours ago</div>
+                    </div>
+                </div>
+                <div class="activity-item">
+                    <div class="activity-icon activity-icon-donation">💰</div>
+                    <div class="activity-content">
+                        <div class="activity-text">Donated 850K resources to alliance</div>
+                        <div class="activity-time">5 hours ago</div>
+                    </div>
+                </div>
+                <div class="activity-item">
+                    <div class="activity-icon activity-icon-event">🎯</div>
+                    <div class="activity-content">
+                        <div class="activity-text">Completed Titan Event - Top 10 damage</div>
+                        <div class="activity-time">1 day ago</div>
+                    </div>
+                </div>
+                <div class="activity-item">
+                    <div class="activity-icon activity-icon-combat">⚔️</div>
+                    <div class="activity-content">
+                        <div class="activity-text">Defended 3 rally attacks successfully</div>
+                        <div class="activity-time">2 days ago</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
