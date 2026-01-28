@@ -24,13 +24,6 @@ st.markdown(
         border-right: 1px solid rgba(255, 255, 255, 0.1);
     }
 
-    /* Section title accent bar */
-    .stSubheader, h2 {
-        border-left: 4px solid transparent;
-        border-image: linear-gradient(135deg, #667eea 0%, #764ba2 100%) 1;
-        padding-left: 12px;
-    }
-
     /* Metric cards styling */
     [data-testid="stMetric"] {
         background: rgba(255, 255, 255, 0.05);
@@ -300,7 +293,7 @@ elif page == "Players":
                     "Officer", options=VALID_OFFICER_ROLES, width="small"
                 ),
                 "Power": st.column_config.NumberColumn("Power (M)", min_value=0.0, format="%.1f"),
-                "Level": st.column_config.NumberColumn("Level", min_value=1, max_value=60, step=1),
+                "Level": st.column_config.NumberColumn("Level", min_value=1, max_value=35, step=1),
             },
             hide_index=True,
             use_container_width=True,
@@ -590,7 +583,7 @@ elif page == "Player Summary":
                     power_str = f"{player.power:.1f}M"
                     st.metric("Current Power", power_str)
                 with stat_cols[1]:
-                    st.metric("Base Level", f"{player.level}/60")
+                    st.metric("Base Level", f"{player.level}/35")
                 with stat_cols[2]:
                     st.metric("Alliance Rank", f"R{player.rank}")
                 with stat_cols[3]:
@@ -829,8 +822,8 @@ elif page == "Import Members":
         # Validate level
         try:
             level = int(level_str)
-            if level < 1 or level > 60:
-                return f"Level must be 1-60, got {level}"
+            if level < 1 or level > 35:
+                return f"Level must be 1-35, got {level}"
         except ValueError:
             return f"Invalid level: {level_str}"
 
@@ -984,20 +977,14 @@ elif page == "Duel VS":
 
     init_database()
 
-    # Tabs for different views
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
-        [
-            "Rolling Report",
-            "Weekly Report",
-            "Cycle Report",
-            "Import Weekly",
-            "Import Daily",
-            "Daily Breakdown",
-            "Manage Weeks",
-        ]
+    duel_view = st.selectbox(
+        "Select View",
+        ["Rolling Report", "Weekly Report", "Cycle Report",
+         "Import Weekly", "Import Daily", "Daily Breakdown", "Manage Weeks"],
+        key="duel_view",
     )
 
-    with tab1:
+    if duel_view == "Rolling Report":
         st.subheader("4-Week Rolling Report")
 
         rolling = get_rolling_report(weeks=4)
@@ -1081,7 +1068,7 @@ elif page == "Duel VS":
                 norm = thresholds["min_avg_normalized"]
                 st.text(f"{tier}: Reliability >= {rel:.0f}%, Avg Norm >= {norm}")
 
-    with tab2:
+    elif duel_view == "Weekly Report":
         st.subheader("Weekly Report")
 
         weeks = get_recent_weeks(count=10)
@@ -1143,7 +1130,7 @@ elif page == "Duel VS":
         else:
             st.info("No duel weeks recorded yet.")
 
-    with tab3:
+    elif duel_view == "Cycle Report":
         st.subheader("Cycle Report (4-Week Performance)")
 
         cycles = get_all_cycles()
@@ -1242,7 +1229,7 @@ elif page == "Duel VS":
                 "Go to the Manage Weeks tab to create a cycle and assign weeks to it."
             )
 
-    with tab4:
+    elif duel_view == "Import Weekly":
         st.subheader("Import Weekly Stats")
         st.markdown("**CSV Format:** `Week,PlayerName,Points,DaysParticipated`")
 
@@ -1271,7 +1258,7 @@ elif page == "Duel VS":
                 else:
                     st.warning("Please paste CSV data first.")
 
-    with tab5:
+    elif duel_view == "Import Daily":
         st.subheader("Import Daily Stats")
 
         weeks = get_recent_weeks(count=10)
@@ -1467,7 +1454,7 @@ elif page == "Duel VS":
                 else:
                     st.info("No daily stats found to aggregate for this week.")
 
-    with tab6:
+    elif duel_view == "Daily Breakdown":
         st.subheader("Daily Breakdown")
 
         weeks = get_recent_weeks(count=10)
@@ -1643,7 +1630,7 @@ elif page == "Duel VS":
         else:
             st.info("No duel weeks recorded yet.")
 
-    with tab7:
+    elif duel_view == "Manage Weeks":
         st.subheader("Manage Duel Weeks & Cycles")
 
         # Create new cycle section
