@@ -1507,6 +1507,35 @@ def aggregate_cycle_stats(cycle_id: int, session: Session | None = None) -> int:
             session.close()
 
 
+def get_cycle_days_with_data_count(cycle_id: int, session: Session | None = None) -> int:
+    """Count DuelDay records in a cycle that have at least one DuelDailyStats entry."""
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    try:
+        weeks = (
+            session.query(DuelWeek)
+            .filter(DuelWeek.cycle_id == cycle_id)
+            .all()
+        )
+        if not weeks:
+            return 0
+
+        week_ids = [w.id for w in weeks]
+        days_with_data = (
+            session.query(DuelDay)
+            .filter(DuelDay.week_id.in_(week_ids))
+            .filter(DuelDay.daily_stats.any())
+            .count()
+        )
+        return days_with_data
+    finally:
+        if close_session:
+            session.close()
+
+
 def get_cycle_report(cycle_id: int, session: Session | None = None) -> dict:
     """Get a detailed report for a cycle including player performance."""
     close_session = session is None
