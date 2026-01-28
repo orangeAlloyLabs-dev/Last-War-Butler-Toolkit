@@ -229,6 +229,11 @@ def get_active_member_count():
         return 0
 
 
+def format_power_m(power: float) -> str:
+    """Format raw power value as millions with 1 decimal (e.g., 163321088 -> '163.3M')."""
+    return f"{power / 1_000_000:.1f}M"
+
+
 if page == "Overview":
     st.header("Alliance Overview")
 
@@ -238,12 +243,12 @@ if page == "Overview":
     with col1:
         st.metric("Total Members", stats["total_members"])
     with col2:
-        # Power is stored as display value (e.g., 145.2 for 145.2M)
         total_power = stats["total_power"]
-        if total_power >= 1000:
-            power_str = f"{total_power / 1000:.2f}B"
+        total_power_m = total_power / 1_000_000
+        if total_power_m >= 1000:
+            power_str = f"{total_power_m / 1000:.2f}B"
         else:
-            power_str = f"{total_power:.1f}M"
+            power_str = f"{total_power_m:.1f}M"
         st.metric("Alliance Power", power_str)
     with col3:
         st.metric("War Win Rate", "—")
@@ -342,7 +347,7 @@ elif page == "Players":
 
         # Multi-select for deactivation
         player_options = {
-            f"{row['Name']} (R{row['Rank']}, {row['Power']:.1f}M)": row["ID"]
+            f"{row['Name']} (R{row['Rank']}, {format_power_m(row['Power'])})": row["ID"]
             for _, row in df.iterrows()
         }
         selected = st.multiselect(
@@ -376,9 +381,9 @@ elif page == "Players":
         st.subheader("Quick Stats")
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Average Power", f"{df['Power'].mean():.1f}M")
+            st.metric("Average Power", format_power_m(df["Power"].mean()))
         with col2:
-            st.metric("Highest Power", f"{df['Power'].max():.1f}M")
+            st.metric("Highest Power", format_power_m(df["Power"].max()))
         with col3:
             st.metric("Average Level", f"{df['Level'].mean():.1f}")
 
@@ -409,7 +414,7 @@ elif page == "Players":
 
             # Reactivate section
             reactivate_options = {
-                f"{row['Name']} (R{row['Rank']}, {row['Power']:.1f}M)": row["ID"]
+                f"{row['Name']} (R{row['Rank']}, {format_power_m(row['Power'])})": row["ID"]
                 for _, row in inactive_df.iterrows()
             }
             selected_reactivate = st.multiselect(
@@ -473,7 +478,7 @@ elif page == "Player Summary":
         # Player selector dropdown
         player_options = {}
         for p_id, p_name, p_rank, p_officer, p_power, p_level in stats["players"]:
-            label = f"{p_name} (R{p_rank}, {p_power:.1f}M)"
+            label = f"{p_name} (R{p_rank}, {format_power_m(p_power)})"
             player_options[label] = p_id
 
         selected_player_label = st.selectbox(
@@ -580,8 +585,7 @@ elif page == "Player Summary":
 
                 stat_cols = st.columns(4)
                 with stat_cols[0]:
-                    power_str = f"{player.power:.1f}M"
-                    st.metric("Current Power", power_str)
+                    st.metric("Current Power", format_power_m(player.power))
                 with stat_cols[1]:
                     st.metric("Base Level", f"{player.level}/35")
                 with stat_cols[2]:
@@ -939,6 +943,245 @@ elif page == "Import Members":
                 except Exception as e:
                     st.error(f"Error importing members: {e}")
 
+    # ── Update Members section ────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("Update Members")
+    st.markdown(
+        "Paste bulk data to update **Rank** and **Power** for existing members.\n\n"
+        "**Format:** `Name, Rank, Power` — one per line"
+    )
+
+    def parse_update_line(line: str) -> dict | str:
+        """Parse a single update line: Name, Rank, Power.
+
+        Returns dict on success, error string on failure.
+        """
+        line = line.strip()
+        if not line:
+            return "Empty line"
+
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) != 3:
+            return f"Expected 3 fields (Name, Rank, Power), got {len(parts)}"
+
+        name, rank_str, power_str = parts
+
+        if not name:
+            return "Name is required"
+
+        try:
+            rank = int(rank_str)
+            if rank < 1 or rank > 5:
+                return f"Rank must be 1-5, got {rank}"
+        except ValueError:
+            return f"Invalid rank: {rank_str}"
+
+        try:
+            power = float(power_str)
+            if power < 0:
+                return f"Power must be >= 0, got {power}"
+        except ValueError:
+            return f"Invalid power: {power_str}"
+
+        return {"name": name, "rank": rank, "power": power}
+
+    update_input = st.text_area(
+        "Bulk Update (one member per line):",
+        height=200,
+        placeholder="Cafeh, 4, 145200000\nLolcks, 3, 100500000\nThe Bear, 4, 109500000",
+        key="update_input",
+    )
+
+    if st.button("Parse & Match", key="update_parse_btn"):
+        if not update_input.strip():
+            st.warning("Please enter update data first.")
+        else:
+            lines = update_input.strip().split("\n")
+            parsed_entries: list[dict] = []
+            parse_errors: list[str] = []
+
+            for i, line in enumerate(lines, 1):
+                if not line.strip():
+                    continue
+                result = parse_update_line(line)
+                if isinstance(result, str):
+                    parse_errors.append(f"Line {i}: {result}")
+                else:
+                    parsed_entries.append(result)
+
+            # Fetch active players for matching
+            stats = get_player_stats(active_only=True)
+            active_players = stats["players"]  # (id, name, rank, officer, power, level)
+
+            # Build lookup: lowercase name -> player tuple
+            name_lookup: dict[str, tuple] = {}
+            for p in active_players:
+                name_lookup[p[1].strip().lower()] = p
+
+            matched: list[dict] = []
+            unmatched: list[dict] = []
+
+            for entry in parsed_entries:
+                key = entry["name"].strip().lower()
+                if key in name_lookup:
+                    p = name_lookup[key]
+                    matched.append(
+                        {
+                            "player_id": p[0],
+                            "player_name": p[1],
+                            "new_rank": entry["rank"],
+                            "new_power": entry["power"],
+                            "old_rank": p[2],
+                            "old_power": p[4],
+                        }
+                    )
+                else:
+                    unmatched.append(
+                        {
+                            "input_name": entry["name"],
+                            "new_rank": entry["rank"],
+                            "new_power": entry["power"],
+                        }
+                    )
+
+            st.session_state["update_matched"] = matched
+            st.session_state["update_unmatched"] = unmatched
+            st.session_state["update_parse_errors"] = parse_errors
+
+    # Show parse errors
+    if st.session_state.get("update_parse_errors"):
+        st.error("**Parse errors:**")
+        for err in st.session_state["update_parse_errors"]:
+            st.text(f"  {err}")
+
+    # Show matched preview
+    if st.session_state.get("update_matched"):
+        st.markdown("#### Matched Members")
+        preview_rows = []
+        for m in st.session_state["update_matched"]:
+            preview_rows.append(
+                {
+                    "Name": m["player_name"],
+                    "Old Rank": f"R{m['old_rank']}",
+                    "New Rank": f"R{m['new_rank']}",
+                    "Old Power": format_power_m(m["old_power"]),
+                    "New Power": format_power_m(m["new_power"]),
+                }
+            )
+        st.dataframe(pd.DataFrame(preview_rows), hide_index=True, use_container_width=True)
+
+    # Show unmatched entries with fix-it selectboxes
+    if st.session_state.get("update_unmatched"):
+        st.markdown("#### Unmatched Entries")
+        st.warning(
+            f"{len(st.session_state['update_unmatched'])} name(s) could not be matched. "
+            "Use the dropdowns below to pick the correct player, or choose **Skip**."
+        )
+
+        # Build list of already-matched player IDs
+        matched_ids = {m["player_id"] for m in st.session_state.get("update_matched", [])}
+
+        # Get active players for the selectbox options
+        stats = get_player_stats(active_only=True)
+        available_players = [p for p in stats["players"] if p[0] not in matched_ids]
+        player_options = ["Skip"] + [
+            f"{p[1]} (R{p[2]}, {format_power_m(p[4])})" for p in available_players
+        ]
+
+        for idx, entry in enumerate(st.session_state["update_unmatched"]):
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.markdown(
+                    f"**{entry['input_name']}** → R{entry['new_rank']}, "
+                    f"{format_power_m(entry['new_power'])}"
+                )
+            with col2:
+                st.selectbox(
+                    f"Match for '{entry['input_name']}'",
+                    options=player_options,
+                    key=f"update_fix_{idx}",
+                    label_visibility="collapsed",
+                )
+
+        if st.button("Apply Matches", key="update_apply_matches"):
+            newly_matched = []
+            still_unmatched = []
+
+            for idx, entry in enumerate(st.session_state["update_unmatched"]):
+                selection = st.session_state.get(f"update_fix_{idx}", "Skip")
+                if selection == "Skip":
+                    # Skip — drop this entry
+                    continue
+                # Find the player from available_players by matching the label
+                for p in available_players:
+                    label = f"{p[1]} (R{p[2]}, {format_power_m(p[4])})"
+                    if label == selection:
+                        newly_matched.append(
+                            {
+                                "player_id": p[0],
+                                "player_name": p[1],
+                                "new_rank": entry["new_rank"],
+                                "new_power": entry["new_power"],
+                                "old_rank": p[2],
+                                "old_power": p[4],
+                            }
+                        )
+                        break
+                else:
+                    still_unmatched.append(entry)
+
+            # Merge newly matched into matched list
+            current_matched = st.session_state.get("update_matched", [])
+            current_matched.extend(newly_matched)
+            st.session_state["update_matched"] = current_matched
+            st.session_state["update_unmatched"] = still_unmatched
+
+            # Clean up selectbox keys
+            cleanup_count = len(st.session_state.get("update_unmatched", [])) + len(newly_matched)
+            for idx in range(cleanup_count):
+                key = f"update_fix_{idx}"
+                if key in st.session_state:
+                    del st.session_state[key]
+
+            st.rerun()
+
+    # Update button — only when there are matched entries and no unmatched remain
+    if st.session_state.get("update_matched") and not st.session_state.get("update_unmatched"):
+        st.markdown("---")
+        st.markdown(f"**{len(st.session_state['update_matched'])} member(s)** ready to update.")
+
+        if st.button("Update Members", type="primary", key="update_members_btn"):
+            try:
+                from src.data.models import Player
+                from src.data.storage import get_session, init_database
+
+                init_database()
+
+                with get_session() as session:
+                    updated = 0
+                    for m in st.session_state["update_matched"]:
+                        player = session.query(Player).get(m["player_id"])
+                        if player:
+                            player.rank = m["new_rank"]
+                            player.power = m["new_power"]
+                            updated += 1
+                    session.commit()
+
+                st.success(f"Successfully updated {updated} member(s)!")
+
+                # Clear session state
+                for key in [
+                    "update_matched",
+                    "update_unmatched",
+                    "update_parse_errors",
+                ]:
+                    if key in st.session_state:
+                        del st.session_state[key]
+
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error updating members: {e}")
+
 elif page == "Duel VS":
     st.header("Duel VS Tracker")
 
@@ -979,8 +1222,15 @@ elif page == "Duel VS":
 
     duel_view = st.selectbox(
         "Select View",
-        ["Rolling Report", "Weekly Report", "Cycle Report",
-         "Import Weekly", "Import Daily", "Daily Breakdown", "Manage Weeks"],
+        [
+            "Rolling Report",
+            "Weekly Report",
+            "Cycle Report",
+            "Import Weekly",
+            "Import Daily",
+            "Daily Breakdown",
+            "Manage Weeks",
+        ],
         key="duel_view",
     )
 
