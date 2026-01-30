@@ -19,6 +19,7 @@ from .models import (
 )
 from .storage import get_session, init_database
 
+
 # Tier thresholds (configurable)
 TIER_THRESHOLDS = {
     "Core": {"min_reliability": 0.90, "min_avg_normalized": 150},
