@@ -38,9 +38,7 @@ def run_migrations(engine):
         columns = [col["name"] for col in inspector.get_columns("duel_weeks")]
         if "cycle_id" not in columns:
             with engine.connect() as conn:
-                conn.execute(
-                    text("ALTER TABLE duel_weeks ADD COLUMN cycle_id INTEGER")
-                )
+                conn.execute(text("ALTER TABLE duel_weeks ADD COLUMN cycle_id INTEGER"))
                 conn.commit()
 
     # Migration: Add name column to duel_cycles if it doesn't exist
@@ -48,9 +46,7 @@ def run_migrations(engine):
         columns = [col["name"] for col in inspector.get_columns("duel_cycles")]
         if "name" not in columns:
             with engine.connect() as conn:
-                conn.execute(
-                    text("ALTER TABLE duel_cycles ADD COLUMN name VARCHAR(100)")
-                )
+                conn.execute(text("ALTER TABLE duel_cycles ADD COLUMN name VARCHAR(100)"))
                 conn.commit()
 
     # Migration: Add is_active column to players if it doesn't exist (default True)
@@ -58,11 +54,18 @@ def run_migrations(engine):
         columns = [col["name"] for col in inspector.get_columns("players")]
         if "is_active" not in columns:
             with engine.connect() as conn:
-                conn.execute(
-                    text("ALTER TABLE players ADD COLUMN is_active BOOLEAN DEFAULT 1")
-                )
+                conn.execute(text("ALTER TABLE players ADD COLUMN is_active BOOLEAN DEFAULT 1"))
                 # Set all existing players to active
                 conn.execute(text("UPDATE players SET is_active = 1 WHERE is_active IS NULL"))
+                conn.commit()
+
+    # Migration: Add kill_count columns to players
+    if "players" in inspector.get_table_names():
+        columns = [col["name"] for col in inspector.get_columns("players")]
+        if "kill_count" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE players ADD COLUMN kill_count INTEGER DEFAULT 0"))
+                conn.execute(text("ALTER TABLE players ADD COLUMN kill_count_updated_at DATETIME"))
                 conn.commit()
 
 

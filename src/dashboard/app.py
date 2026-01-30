@@ -167,6 +167,7 @@ page = st.sidebar.radio(
         "Players",
         "Player Summary",
         "Import Members",
+        "Update Kills",
         "Duel VS",
         "War Results",
         "Analytics",
@@ -229,6 +230,25 @@ def get_active_member_count():
         return 0
 
 
+def get_total_alliance_kills(active_only: bool = True) -> int:
+    """Get total kill count across all active players."""
+    try:
+        from sqlalchemy import func as sql_func
+
+        from src.data.models import Player
+        from src.data.storage import get_session, init_database
+
+        init_database()
+        with get_session() as session:
+            query = session.query(sql_func.sum(Player.kill_count))
+            if active_only:
+                query = query.filter(Player.is_active == True)  # noqa: E712
+            result = query.scalar()
+            return result or 0
+    except Exception:
+        return 0
+
+
 def format_power_m(power: float) -> str:
     """Format raw power value as millions with 1 decimal (e.g., 163321088 -> '163.3M')."""
     return f"{power / 1_000_000:.1f}M"
@@ -238,8 +258,9 @@ if page == "Overview":
     st.header("Alliance Overview")
 
     stats = get_player_stats()
+    total_kills = get_total_alliance_kills()
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Total Members", stats["total_members"])
     with col2:
@@ -251,6 +272,8 @@ if page == "Overview":
             power_str = f"{total_power_m:.1f}M"
         st.metric("Alliance Power", power_str)
     with col3:
+        st.metric("Total Kills", f"{total_kills:,}")
+    with col4:
         st.metric("War Win Rate", "—")
 
     if stats["total_members"] == 0:
@@ -460,7 +483,12 @@ elif page == "Player Summary":
 
     from src.data.duel_tracker import (
         TIER_THRESHOLDS,
-        get_player_daily_averages,
+        get_all_players_current_week_daily_points,
+        get_all_players_cycle_theme_totals,
+        get_current_cycle,
+        get_current_week,
+        get_player_current_week_daily_points,
+        get_player_cycle_theme_totals,
         get_recent_weeks,
         get_rolling_report,
     )
@@ -583,7 +611,7 @@ elif page == "Player Summary":
                 }
                 tier_color = tier_colors.get(tier, "#6c757d")
 
-                stat_cols = st.columns(4)
+                stat_cols = st.columns(5)
                 with stat_cols[0]:
                     st.metric("Current Power", format_power_m(player.power))
                 with stat_cols[1]:
@@ -591,6 +619,10 @@ elif page == "Player Summary":
                 with stat_cols[2]:
                     st.metric("Alliance Rank", f"R{player.rank}")
                 with stat_cols[3]:
+                    st.metric("Kill Count", f"{player.kill_count:,}")
+                    if player.kill_count_updated_at:
+                        st.caption(f"Updated: {player.kill_count_updated_at.strftime('%m/%d')}")
+                with stat_cols[4]:
                     st.markdown(
                         f"**Performance Tier**<br>"
                         f"<span style='color:{tier_color};font-size:24px;font-weight:bold;'>"
@@ -656,37 +688,169 @@ elif page == "Player Summary":
                 st.markdown("---")
                 st.subheader("Day Theme Performance")
 
-                daily_avgs = get_player_daily_averages(selected_player_id, weeks=4)
+                # Shortened theme names for display
+                short_themes = {
+                    "Radar Training": "Radar",
+                    "Base Expansion": "Base",
+                    "Age of Science": "Science",
+                    "Train Heroes": "Heroes",
+                    "Total Mobilization": "Mobilize",
+                    "Enemy Buster": "Buster",
+                }
 
-                if "error" not in daily_avgs and daily_avgs.get("day_averages"):
-                    day_cols = st.columns(6)
-                    for i, (day_num, day_data) in enumerate(daily_avgs["day_averages"].items()):
-                        with day_cols[i]:
-                            theme = day_data["theme"]
-                            avg_pts = day_data["avg_points"]
-                            times = day_data["times_participated"]
-                            total_opp = day_data["total_opportunities"]
+                def format_points(pts: float | None) -> str:
+                    """Format points for display."""
+                    if pts is None:
+                        return "--"
+                    if pts >= 1_000_000:
+                        return f"{pts / 1_000_000:.1f}M"
+                    elif pts >= 1_000:
+                        return f"{pts / 1_000:.0f}K"
+                    else:
+                        return f"{pts:.0f}"
 
-                            # Shortened theme names for display
-                            short_themes = {
-                                "Radar Training": "Radar",
-                                "Base Expansion": "Base",
-                                "Age of Science": "Science",
-                                "Train Heroes": "Heroes",
-                                "Total Mobilization": "Mobilize",
-                                "Enemy Buster": "Buster",
-                            }
-                            display_theme = short_themes.get(theme, theme)
+                def get_rank_str(rank: int | None, total: int) -> str:
+                    """Format rank for display."""
+                    if rank is None:
+                        return ""
+                    rank_suffix = (
+                        "th"
+                        if 11 <= rank <= 13
+                        else {1: "st", 2: "nd", 3: "rd"}.get(rank % 10, "th")
+                    )
+                    return f" {rank}{rank_suffix} of {total}"
 
-                            st.markdown(f"**{display_theme}**")
-                            if avg_pts >= 1_000_000:
-                                pts_str = f"{avg_pts / 1_000_000:.1f}M"
-                            elif avg_pts >= 1_000:
-                                pts_str = f"{avg_pts / 1_000:.0f}K"
-                            else:
-                                pts_str = f"{avg_pts:.0f}"
-                            st.metric("Avg", pts_str, label_visibility="collapsed")
-                            st.caption(f"{times}/{total_opp} weeks")
+                def get_status_color_icon(pts: float | None) -> tuple[str, str]:
+                    """Get status color and icon based on points threshold."""
+                    if pts is None:
+                        return "#6c757d", "--"  # gray for no data
+                    if pts >= 7_200_000:
+                        return "#22c55e", "✓"  # green
+                    elif pts >= 3_600_000:
+                        return "#eab308", "⚠"  # yellow
+                    else:
+                        return "#ef4444", "✗"  # red
+
+                # Get current week data
+                current_week = get_current_week()
+                current_week_data = get_player_current_week_daily_points(selected_player_id)
+                all_current_week = get_all_players_current_week_daily_points()
+
+                # Get current cycle data
+                current_cycle = get_current_cycle()
+                cycle_data = None
+                all_cycle_totals = {}
+                if current_cycle:
+                    cycle_data = get_player_cycle_theme_totals(selected_player_id, current_cycle.id)
+                    all_cycle_totals = get_all_players_cycle_theme_totals(current_cycle.id)
+
+                has_current_week_data = (
+                    "error" not in current_week_data
+                    and current_week_data.get("days")
+                    and any(d["points"] is not None for d in current_week_data["days"].values())
+                )
+                has_cycle_data = (
+                    cycle_data
+                    and "error" not in cycle_data
+                    and cycle_data.get("day_totals")
+                    and any(d["times_participated"] > 0 for d in cycle_data["day_totals"].values())
+                )
+
+                if has_current_week_data or has_cycle_data:
+                    # === Current Week Section ===
+                    if has_current_week_data:
+                        week_num = current_week_data.get("week_number", "?")
+                        st.markdown(f"**Current Week (Week {week_num})**")
+
+                        day_cols = st.columns(6)
+                        for day_num in range(1, 7):
+                            with day_cols[day_num - 1]:
+                                day_info = current_week_data["days"].get(day_num, {})
+                                theme = day_info.get("theme", f"Day {day_num}")
+                                points = day_info.get("points")
+
+                                display_theme = short_themes.get(theme, theme)
+                                st.markdown(f"**{display_theme}**")
+                                st.metric(
+                                    "Pts", format_points(points), label_visibility="collapsed"
+                                )
+
+                                # Calculate rank for this day
+                                if points is not None:
+                                    day_scores = []
+                                    for pid, pdata in all_current_week.items():
+                                        if day_num in pdata:
+                                            day_scores.append((pid, pdata[day_num]))
+                                    day_scores.sort(key=lambda x: x[1], reverse=True)
+                                    total_players = len(day_scores)
+                                    rank = None
+                                    for idx, (pid, _) in enumerate(day_scores):
+                                        if pid == selected_player_id:
+                                            rank = idx + 1
+                                            break
+
+                                    status_color, status_icon = get_status_color_icon(points)
+                                    rank_str = get_rank_str(rank, total_players)
+                                    st.markdown(
+                                        f"<span style='color:{status_color};font-size:16px;'>"
+                                        f"{status_icon}{rank_str}</span>",
+                                        unsafe_allow_html=True,
+                                    )
+                                else:
+                                    st.markdown(
+                                        "<span style='color:#6c757d;font-size:16px;'>--</span>",
+                                        unsafe_allow_html=True,
+                                    )
+
+                        st.markdown("")  # Spacer
+
+                    # === Cycle Total Section ===
+                    if has_cycle_data:
+                        cycle_num = cycle_data.get("cycle_number", "?")
+                        weeks_in_cycle = cycle_data.get("weeks_in_cycle", 0)
+                        st.markdown(f"**Cycle Total (Cycle {cycle_num})**")
+
+                        day_cols = st.columns(6)
+                        for day_num in range(1, 7):
+                            with day_cols[day_num - 1]:
+                                day_info = cycle_data["day_totals"].get(day_num, {})
+                                theme = day_info.get("theme", f"Day {day_num}")
+                                total_pts = day_info.get("total_points", 0)
+                                times_participated = day_info.get("times_participated", 0)
+
+                                display_theme = short_themes.get(theme, theme)
+                                st.markdown(f"**{display_theme}**")
+                                st.metric(
+                                    "Total", format_points(total_pts), label_visibility="collapsed"
+                                )
+
+                                # Calculate rank for this day (cycle totals)
+                                if times_participated > 0:
+                                    day_scores = []
+                                    for pid, pdata in all_cycle_totals.items():
+                                        if day_num in pdata:
+                                            day_scores.append((pid, pdata[day_num]))
+                                    day_scores.sort(key=lambda x: x[1], reverse=True)
+                                    total_players = len(day_scores)
+                                    rank = None
+                                    for idx, (pid, _) in enumerate(day_scores):
+                                        if pid == selected_player_id:
+                                            rank = idx + 1
+                                            break
+
+                                    status_color, status_icon = get_status_color_icon(total_pts)
+                                    rank_str = get_rank_str(rank, total_players)
+                                    st.markdown(
+                                        f"<span style='color:{status_color};font-size:16px;'>"
+                                        f"{status_icon}{rank_str}</span>",
+                                        unsafe_allow_html=True,
+                                    )
+                                    st.caption(f"{times_participated}/{weeks_in_cycle} wks")
+                                else:
+                                    st.markdown(
+                                        "<span style='color:#6c757d;font-size:16px;'>--</span>",
+                                        unsafe_allow_html=True,
+                                    )
                 else:
                     st.info("No daily performance data available.")
 
@@ -1181,6 +1345,263 @@ elif page == "Import Members":
                 st.rerun()
             except Exception as e:
                 st.error(f"Error updating members: {e}")
+
+elif page == "Update Kills":
+    st.header("Update Kill Counts")
+
+    from datetime import datetime
+
+    import pandas as pd
+
+    from src.data.models import KillHistory, Player
+    from src.data.storage import get_session, init_database
+
+    init_database()
+
+    # Show current total kills
+    total_kills = get_total_alliance_kills()
+    st.metric("Total Alliance Kills", f"{total_kills:,}")
+
+    st.markdown(
+        "Paste kill count data to update player kill counts.\n\n"
+        "**Format:** `Name, Kills` — one per line"
+    )
+
+    def parse_kill_line(line: str) -> dict | str:
+        """Parse a single kill update line: Name, Kills.
+
+        Returns dict on success, error string on failure.
+        """
+        line = line.strip()
+        if not line:
+            return "Empty line"
+
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) != 2:
+            return f"Expected 2 fields (Name, Kills), got {len(parts)}"
+
+        name, kills_str = parts
+
+        if not name:
+            return "Name is required"
+
+        try:
+            kills = int(kills_str.replace(",", ""))
+            if kills < 0:
+                return f"Kills must be >= 0, got {kills}"
+        except ValueError:
+            return f"Invalid kills: {kills_str}"
+
+        return {"name": name, "kills": kills}
+
+    kills_input = st.text_area(
+        "Kill Data (one member per line):",
+        height=200,
+        placeholder="Cafeh, 1234567\nLolcks, 987654\nThe Bear, 555000",
+        key="kills_input",
+    )
+
+    if st.button("Parse & Match", key="kills_parse_btn"):
+        if not kills_input.strip():
+            st.warning("Please enter kill data first.")
+        else:
+            lines = kills_input.strip().split("\n")
+            parsed_entries: list[dict] = []
+            parse_errors: list[str] = []
+
+            for i, line in enumerate(lines, 1):
+                if not line.strip():
+                    continue
+                result = parse_kill_line(line)
+                if isinstance(result, str):
+                    parse_errors.append(f"Line {i}: {result}")
+                else:
+                    parsed_entries.append(result)
+
+            # Fetch active players for matching
+            stats = get_player_stats(active_only=True)
+            active_players = stats["players"]  # (id, name, rank, officer, power, level)
+
+            # Get kill counts for active players
+            with get_session() as session:
+                player_kills = {}
+                for p in active_players:
+                    player = session.query(Player).filter(Player.id == p[0]).first()
+                    if player:
+                        player_kills[p[0]] = player.kill_count
+
+            # Build lookup: lowercase name -> player tuple
+            name_lookup: dict[str, tuple] = {}
+            for p in active_players:
+                name_lookup[p[1].strip().lower()] = p
+
+            matched: list[dict] = []
+            unmatched: list[dict] = []
+
+            for entry in parsed_entries:
+                key = entry["name"].strip().lower()
+                if key in name_lookup:
+                    p = name_lookup[key]
+                    old_kills = player_kills.get(p[0], 0)
+                    matched.append(
+                        {
+                            "player_id": p[0],
+                            "player_name": p[1],
+                            "new_kills": entry["kills"],
+                            "old_kills": old_kills,
+                        }
+                    )
+                else:
+                    unmatched.append(
+                        {
+                            "input_name": entry["name"],
+                            "new_kills": entry["kills"],
+                        }
+                    )
+
+            st.session_state["kills_matched"] = matched
+            st.session_state["kills_unmatched"] = unmatched
+            st.session_state["kills_parse_errors"] = parse_errors
+
+    # Show parse errors
+    if st.session_state.get("kills_parse_errors"):
+        st.error("**Parse errors:**")
+        for err in st.session_state["kills_parse_errors"]:
+            st.text(f"  {err}")
+
+    # Show matched preview
+    if st.session_state.get("kills_matched"):
+        st.markdown("#### Matched Members")
+        preview_rows = []
+        for m in st.session_state["kills_matched"]:
+            change = m["new_kills"] - m["old_kills"]
+            change_str = f"+{change:,}" if change >= 0 else f"{change:,}"
+            preview_rows.append(
+                {
+                    "Name": m["player_name"],
+                    "Old Kills": f"{m['old_kills']:,}",
+                    "New Kills": f"{m['new_kills']:,}",
+                    "Change": change_str,
+                }
+            )
+        st.dataframe(pd.DataFrame(preview_rows), hide_index=True, use_container_width=True)
+
+    # Show unmatched entries with fix-it selectboxes
+    if st.session_state.get("kills_unmatched"):
+        st.markdown("#### Unmatched Entries")
+        st.warning(
+            f"{len(st.session_state['kills_unmatched'])} name(s) could not be matched. "
+            "Use the dropdowns below to pick the correct player, or choose **Skip**."
+        )
+
+        # Build list of already-matched player IDs
+        matched_ids = {m["player_id"] for m in st.session_state.get("kills_matched", [])}
+
+        # Get active players for the selectbox options
+        stats = get_player_stats(active_only=True)
+        available_players = [p for p in stats["players"] if p[0] not in matched_ids]
+        player_options = ["Skip"] + [
+            f"{p[1]} (R{p[2]}, {format_power_m(p[4])})" for p in available_players
+        ]
+
+        for idx, entry in enumerate(st.session_state["kills_unmatched"]):
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.markdown(f"**{entry['input_name']}** → {entry['new_kills']:,} kills")
+            with col2:
+                st.selectbox(
+                    f"Match for '{entry['input_name']}'",
+                    options=player_options,
+                    key=f"kills_fix_{idx}",
+                    label_visibility="collapsed",
+                )
+
+        if st.button("Apply Matches", key="kills_apply_matches"):
+            # Get kill counts for matching
+            with get_session() as session:
+                player_kills = {}
+                for p in available_players:
+                    player = session.query(Player).filter(Player.id == p[0]).first()
+                    if player:
+                        player_kills[p[0]] = player.kill_count
+
+            newly_matched = []
+
+            for idx, entry in enumerate(st.session_state["kills_unmatched"]):
+                selection = st.session_state.get(f"kills_fix_{idx}", "Skip")
+                if selection == "Skip":
+                    continue
+                # Find the player from available_players by matching the label
+                for p in available_players:
+                    label = f"{p[1]} (R{p[2]}, {format_power_m(p[4])})"
+                    if label == selection:
+                        old_kills = player_kills.get(p[0], 0)
+                        newly_matched.append(
+                            {
+                                "player_id": p[0],
+                                "player_name": p[1],
+                                "new_kills": entry["new_kills"],
+                                "old_kills": old_kills,
+                            }
+                        )
+                        break
+
+            # Merge newly matched into matched list
+            current_matched = st.session_state.get("kills_matched", [])
+            current_matched.extend(newly_matched)
+            st.session_state["kills_matched"] = current_matched
+            st.session_state["kills_unmatched"] = []
+
+            # Clean up selectbox keys
+            cleanup_count = len(st.session_state.get("kills_unmatched", [])) + len(newly_matched)
+            for idx in range(cleanup_count):
+                key = f"kills_fix_{idx}"
+                if key in st.session_state:
+                    del st.session_state[key]
+
+            st.rerun()
+
+    # Update button — only when there are matched entries and no unmatched remain
+    if st.session_state.get("kills_matched") and not st.session_state.get("kills_unmatched"):
+        st.markdown("---")
+        st.markdown(f"**{len(st.session_state['kills_matched'])} member(s)** ready to update.")
+
+        if st.button("Update Kills", type="primary", key="update_kills_btn"):
+            try:
+                with get_session() as session:
+                    updated = 0
+                    now = datetime.now()
+                    for m in st.session_state["kills_matched"]:
+                        player = session.query(Player).get(m["player_id"])
+                        if player:
+                            # Create history record
+                            history = KillHistory(
+                                player_id=player.id,
+                                kill_count=m["new_kills"],
+                                recorded_at=now,
+                            )
+                            session.add(history)
+
+                            # Update player
+                            player.kill_count = m["new_kills"]
+                            player.kill_count_updated_at = now
+                            updated += 1
+                    session.commit()
+
+                st.success(f"Successfully updated {updated} member(s)!")
+
+                # Clear session state
+                for key in [
+                    "kills_matched",
+                    "kills_unmatched",
+                    "kills_parse_errors",
+                ]:
+                    if key in st.session_state:
+                        del st.session_state[key]
+
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error updating kills: {e}")
 
 elif page == "Duel VS":
     st.header("Duel VS Tracker")

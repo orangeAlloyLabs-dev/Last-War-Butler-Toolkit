@@ -30,6 +30,8 @@ class Player(Base):
     )  # Leader, Warlord, Recruiter, Muse, Butler
     power: Mapped[float] = mapped_column(Float, default=0.0)  # e.g., 145.2 means 145.2M
     level: Mapped[int] = mapped_column(Integer, default=1)
+    kill_count: Mapped[int] = mapped_column(Integer, default=0)
+    kill_count_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -190,4 +192,18 @@ class DuelCycleStats(Base):
 
     # Relationships
     cycle: Mapped["DuelCycle"] = relationship("DuelCycle", back_populates="stats")
+    player: Mapped["Player"] = relationship("Player")
+
+
+class KillHistory(Base):
+    """Historical kill count tracking for players."""
+
+    __tablename__ = "kill_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    player_id: Mapped[int] = mapped_column(Integer, ForeignKey("players.id"), nullable=False)
+    kill_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
     player: Mapped["Player"] = relationship("Player")
