@@ -948,6 +948,73 @@ def get_player_daily_averages(
             session.close()
 
 
+def get_all_players_daily_averages(
+    weeks: int = ROLLING_WEEKS, session: Session | None = None
+) -> dict[int, dict[int, float]]:
+    """Get daily averages for all active players.
+
+    Returns:
+        Dict mapping player_id -> {day_number -> avg_points}
+    """
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    try:
+        recent_weeks = get_recent_weeks(count=weeks, session=session)
+        if not recent_weeks:
+            return {}
+
+        # Get all active players
+        active_players = session.query(Player).filter(Player.is_active.is_(True)).all()
+        if not active_players:
+            return {}
+
+        player_ids = [p.id for p in active_players]
+
+        # Get all days for recent weeks
+        week_ids = [w.id for w in recent_weeks]
+        days = session.query(DuelDay).filter(DuelDay.week_id.in_(week_ids)).all()
+        day_ids = [d.id for d in days]
+
+        # Get all daily stats for these days and players
+        all_stats = (
+            session.query(DuelDailyStats)
+            .filter(
+                DuelDailyStats.player_id.in_(player_ids),
+                DuelDailyStats.day_id.in_(day_ids),
+            )
+            .all()
+        )
+
+        # Group stats by player_id and day_number
+        # player_day_scores: {player_id: {day_number: [scores]}}
+        player_day_scores: dict[int, dict[int, list[float]]] = {
+            pid: {i: [] for i in range(1, 7)} for pid in player_ids
+        }
+
+        for stat in all_stats:
+            day = next((d for d in days if d.id == stat.day_id), None)
+            if day:
+                player_day_scores[stat.player_id][day.day_number].append(stat.points)
+
+        # Calculate averages
+        result: dict[int, dict[int, float]] = {}
+        for player_id, day_scores in player_day_scores.items():
+            player_avgs: dict[int, float] = {}
+            for day_num, scores in day_scores.items():
+                if scores:
+                    player_avgs[day_num] = sum(scores) / len(scores)
+            if player_avgs:  # Only include players with at least some data
+                result[player_id] = player_avgs
+
+        return result
+    finally:
+        if close_session:
+            session.close()
+
+
 # ============ Stats Recording ============
 
 
@@ -1515,11 +1582,7 @@ def get_cycle_days_with_data_count(cycle_id: int, session: Session | None = None
         session = get_session()
 
     try:
-        weeks = (
-            session.query(DuelWeek)
-            .filter(DuelWeek.cycle_id == cycle_id)
-            .all()
-        )
+        weeks = session.query(DuelWeek).filter(DuelWeek.cycle_id == cycle_id).all()
         if not weeks:
             return 0
 
@@ -1531,6 +1594,288 @@ def get_cycle_days_with_data_count(cycle_id: int, session: Session | None = None
             .count()
         )
         return days_with_data
+    finally:
+        if close_session:
+            session.close()
+
+
+def get_current_cycle(session: Session | None = None) -> DuelCycle | None:
+    """Get the most recent cycle (highest cycle_number)."""
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    try:
+        return session.query(DuelCycle).order_by(desc(DuelCycle.cycle_number)).first()
+    finally:
+        if close_session:
+            session.close()
+
+
+def get_current_week(session: Session | None = None) -> DuelWeek | None:
+    """Get the most recent week."""
+    return get_latest_week(session=session)
+
+
+def get_player_current_week_daily_points(player_id: int, session: Session | None = None) -> dict:
+    """Get a player's daily points for the current week.
+
+    Returns:
+        {
+            "week_id": int,
+            "week_number": int,
+            "days": {
+                1: {"theme": str, "points": float | None},
+                2: {...},
+                ...
+            }
+        }
+    """
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    try:
+        week = get_latest_week(session=session)
+        if not week:
+            return {"error": "No weeks found"}
+
+        days = get_days_for_week(week.id, session=session)
+        day_ids = [d.id for d in days]
+
+        # Get player's daily stats for this week
+        stats = (
+            session.query(DuelDailyStats)
+            .filter(
+                DuelDailyStats.player_id == player_id,
+                DuelDailyStats.day_id.in_(day_ids),
+            )
+            .all()
+        )
+
+        # Build day -> points mapping
+        day_points: dict[int, dict] = {}
+        for day_num in range(1, 7):
+            theme = DUEL_DAY_THEMES.get(day_num, f"Day {day_num}")
+            day = next((d for d in days if d.day_number == day_num), None)
+            points = None
+            if day:
+                stat = next((s for s in stats if s.day_id == day.id), None)
+                if stat:
+                    points = stat.points
+            day_points[day_num] = {"theme": theme, "points": points}
+
+        return {
+            "week_id": week.id,
+            "week_number": week.week_number,
+            "days": day_points,
+        }
+    finally:
+        if close_session:
+            session.close()
+
+
+def get_player_cycle_theme_totals(
+    player_id: int, cycle_id: int, session: Session | None = None
+) -> dict:
+    """Get total points per theme for a player across all weeks in a cycle.
+
+    Returns:
+        {
+            "cycle_id": int,
+            "cycle_number": int,
+            "weeks_in_cycle": int,
+            "day_totals": {
+                1: {"theme": str, "total_points": float, "times_participated": int},
+                2: {...},
+                ...
+            }
+        }
+    """
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    try:
+        cycle = session.query(DuelCycle).filter(DuelCycle.id == cycle_id).first()
+        if not cycle:
+            return {"error": f"Cycle {cycle_id} not found"}
+
+        # Get all weeks in this cycle
+        weeks = session.query(DuelWeek).filter(DuelWeek.cycle_id == cycle_id).all()
+        if not weeks:
+            return {
+                "cycle_id": cycle_id,
+                "cycle_number": cycle.cycle_number,
+                "weeks_in_cycle": 0,
+                "day_totals": {},
+            }
+
+        week_ids = [w.id for w in weeks]
+
+        # Get all days for these weeks
+        days = session.query(DuelDay).filter(DuelDay.week_id.in_(week_ids)).all()
+        day_ids = [d.id for d in days]
+
+        # Get player's daily stats
+        stats = (
+            session.query(DuelDailyStats)
+            .filter(
+                DuelDailyStats.player_id == player_id,
+                DuelDailyStats.day_id.in_(day_ids),
+            )
+            .all()
+        )
+
+        # Aggregate by day number (theme)
+        day_totals: dict[int, dict] = {}
+        for day_num in range(1, 7):
+            theme = DUEL_DAY_THEMES.get(day_num, f"Day {day_num}")
+            # Get all days with this day_number
+            matching_days = [d for d in days if d.day_number == day_num]
+            matching_day_ids = [d.id for d in matching_days]
+            # Sum points from stats for these days
+            matching_stats = [s for s in stats if s.day_id in matching_day_ids]
+            total_points = sum(s.points for s in matching_stats)
+            times_participated = len(matching_stats)
+            day_totals[day_num] = {
+                "theme": theme,
+                "total_points": total_points,
+                "times_participated": times_participated,
+            }
+
+        return {
+            "cycle_id": cycle_id,
+            "cycle_number": cycle.cycle_number,
+            "weeks_in_cycle": len(weeks),
+            "day_totals": day_totals,
+        }
+    finally:
+        if close_session:
+            session.close()
+
+
+def get_all_players_cycle_theme_totals(
+    cycle_id: int, session: Session | None = None
+) -> dict[int, dict[int, float]]:
+    """Get cycle theme totals for all active players (for ranking).
+
+    Returns:
+        Dict mapping player_id -> {day_number -> total_points}
+    """
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    try:
+        cycle = session.query(DuelCycle).filter(DuelCycle.id == cycle_id).first()
+        if not cycle:
+            return {}
+
+        # Get all weeks in this cycle
+        weeks = session.query(DuelWeek).filter(DuelWeek.cycle_id == cycle_id).all()
+        if not weeks:
+            return {}
+
+        week_ids = [w.id for w in weeks]
+
+        # Get all active players
+        active_players = session.query(Player).filter(Player.is_active.is_(True)).all()
+        if not active_players:
+            return {}
+
+        player_ids = [p.id for p in active_players]
+
+        # Get all days for these weeks
+        days = session.query(DuelDay).filter(DuelDay.week_id.in_(week_ids)).all()
+        day_ids = [d.id for d in days]
+
+        # Get all daily stats
+        all_stats = (
+            session.query(DuelDailyStats)
+            .filter(
+                DuelDailyStats.player_id.in_(player_ids),
+                DuelDailyStats.day_id.in_(day_ids),
+            )
+            .all()
+        )
+
+        # Aggregate by player_id and day_number
+        result: dict[int, dict[int, float]] = {}
+        for player_id in player_ids:
+            player_totals: dict[int, float] = {}
+            for day_num in range(1, 7):
+                matching_days = [d for d in days if d.day_number == day_num]
+                matching_day_ids = [d.id for d in matching_days]
+                matching_stats = [
+                    s
+                    for s in all_stats
+                    if s.player_id == player_id and s.day_id in matching_day_ids
+                ]
+                if matching_stats:
+                    player_totals[day_num] = sum(s.points for s in matching_stats)
+            if player_totals:
+                result[player_id] = player_totals
+
+        return result
+    finally:
+        if close_session:
+            session.close()
+
+
+def get_all_players_current_week_daily_points(
+    session: Session | None = None,
+) -> dict[int, dict[int, float]]:
+    """Get current week daily points for all active players (for ranking).
+
+    Returns:
+        Dict mapping player_id -> {day_number -> points}
+    """
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    try:
+        week = get_latest_week(session=session)
+        if not week:
+            return {}
+
+        # Get all active players
+        active_players = session.query(Player).filter(Player.is_active.is_(True)).all()
+        if not active_players:
+            return {}
+
+        player_ids = [p.id for p in active_players]
+
+        # Get all days for this week
+        days = get_days_for_week(week.id, session=session)
+        day_ids = [d.id for d in days]
+
+        # Get all daily stats for this week
+        all_stats = (
+            session.query(DuelDailyStats)
+            .filter(
+                DuelDailyStats.player_id.in_(player_ids),
+                DuelDailyStats.day_id.in_(day_ids),
+            )
+            .all()
+        )
+
+        # Build player -> day -> points mapping
+        result: dict[int, dict[int, float]] = {}
+        for stat in all_stats:
+            day = next((d for d in days if d.id == stat.day_id), None)
+            if day:
+                if stat.player_id not in result:
+                    result[stat.player_id] = {}
+                result[stat.player_id][day.day_number] = stat.points
+
+        return result
     finally:
         if close_session:
             session.close()
