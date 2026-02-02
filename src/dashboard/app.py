@@ -171,6 +171,7 @@ page = st.sidebar.radio(
         "Duel VS",
         "War Results",
         "Analytics",
+        "Settings",
     ],
 )
 
@@ -621,7 +622,9 @@ elif page == "Player Summary":
                 with stat_cols[3]:
                     st.metric("Kill Count", f"{player.kill_count:,}")
                     if player.kill_count_updated_at:
-                        st.caption(f"Updated: {player.kill_count_updated_at.strftime('%m/%d')}")
+                        st.caption(
+                            f"Updated: {player.kill_count_updated_at.strftime('%Y-%m-%d %H:%M')}"
+                        )
                 with stat_cols[4]:
                     st.markdown(
                         f"**Performance Tier**<br>"
@@ -683,6 +686,59 @@ elif page == "Player Summary":
                         st.metric("Avg Normalized", f"{avg_normalized:.1f}")
                 else:
                     st.info("No VS combat data available for this player in the last 4 weeks.")
+
+                # === Kill Growth Section ===
+                st.markdown("---")
+                st.subheader("Kill Growth")
+
+                from src.data.duel_tracker import (
+                    get_player_kill_growth_metrics,
+                    get_player_kill_history,
+                )
+
+                kill_metrics = get_player_kill_growth_metrics(selected_player_id)
+
+                if kill_metrics["current_kills"] > 0 or kill_metrics["recent_weeks"]:
+                    # Kill growth metrics row
+                    kill_cols = st.columns(3)
+                    with kill_cols[0]:
+                        st.metric("Current Kills", f"{kill_metrics['current_kills']:,}")
+                    with kill_cols[1]:
+                        gained = kill_metrics["kills_gained_since_last"]
+                        gained_str = f"+{gained:,}" if gained >= 0 else f"{gained:,}"
+                        st.metric("Since Last Update", gained_str)
+                    with kill_cols[2]:
+                        avg_growth = kill_metrics["avg_weekly_growth"]
+                        st.metric("Avg Weekly Growth", f"+{avg_growth:,.0f}")
+
+                    # Kill history chart
+                    kill_history = get_player_kill_history(selected_player_id)
+                    if kill_history and len(kill_history) > 1:
+                        st.markdown("**Kill History**")
+                        kill_df = pd.DataFrame(kill_history)
+                        kill_df["date"] = pd.to_datetime(kill_df["date"])
+                        st.line_chart(kill_df.set_index("date")["kills"])
+
+                    # Recent weeks kill progression
+                    if kill_metrics["recent_weeks"]:
+                        st.markdown("**Recent Weeks**")
+                        weeks_data = []
+                        for wk in kill_metrics["recent_weeks"]:
+                            gained_str = f"+{wk['gained']:,}" if wk["gained"] is not None else "--"
+                            weeks_data.append(
+                                {
+                                    "Week": f"Week {wk['week']}",
+                                    "Kills": f"{wk['kills_end']:,}" if wk["kills_end"] else "--",
+                                    "Growth": gained_str,
+                                }
+                            )
+                        st.dataframe(
+                            pd.DataFrame(weeks_data),
+                            hide_index=True,
+                            use_container_width=True,
+                        )
+                else:
+                    st.info("No kill data available for this player.")
 
                 # === Day Performance Section ===
                 st.markdown("---")
@@ -902,6 +958,138 @@ elif page == "Player Summary":
                         st.info("No recent week data available.")
                 else:
                     st.info("No duel weeks recorded yet.")
+
+                # === Export Player Card Section ===
+                st.markdown("---")
+                st.subheader("Export Player Card")
+
+                from src.dashboard.exports import (
+                    PlayerCardData,
+                    generate_player_card_gif,
+                    generate_player_card_png,
+                )
+
+                # Build card data from existing variables
+                # Prepare current week data with ranks
+                export_current_week_data = {}
+                if has_current_week_data:
+                    export_days = {}
+                    for day_num in range(1, 7):
+                        day_info = current_week_data["days"].get(day_num, {})
+                        points = day_info.get("points")
+                        rank = None
+                        total_players = 0
+                        if points is not None:
+                            day_scores = []
+                            for pid, pdata in all_current_week.items():
+                                if day_num in pdata:
+                                    day_scores.append((pid, pdata[day_num]))
+                            day_scores.sort(key=lambda x: x[1], reverse=True)
+                            total_players = len(day_scores)
+                            for idx, (pid, _) in enumerate(day_scores):
+                                if pid == selected_player_id:
+                                    rank = idx + 1
+                                    break
+                        export_days[day_num] = {
+                            "theme": day_info.get("theme", f"Day {day_num}"),
+                            "points": points,
+                            "rank": rank,
+                            "total": total_players,
+                        }
+                    export_current_week_data = {
+                        "week_number": current_week_data.get("week_number", "?"),
+                        "days": export_days,
+                    }
+
+                # Prepare cycle data with ranks
+                export_cycle_data = None
+                if has_cycle_data:
+                    export_day_totals = {}
+                    for day_num in range(1, 7):
+                        day_info = cycle_data["day_totals"].get(day_num, {})
+                        total_pts = day_info.get("total_points", 0)
+                        times_participated = day_info.get("times_participated", 0)
+                        rank = None
+                        total_players = 0
+                        if times_participated > 0:
+                            day_scores = []
+                            for pid, pdata in all_cycle_totals.items():
+                                if day_num in pdata:
+                                    day_scores.append((pid, pdata[day_num]))
+                            day_scores.sort(key=lambda x: x[1], reverse=True)
+                            total_players = len(day_scores)
+                            for idx, (pid, _) in enumerate(day_scores):
+                                if pid == selected_player_id:
+                                    rank = idx + 1
+                                    break
+                        export_day_totals[day_num] = {
+                            "theme": day_info.get("theme", f"Day {day_num}"),
+                            "total_points": total_pts,
+                            "times_participated": times_participated,
+                            "rank": rank,
+                            "total_players": total_players,
+                        }
+                    export_cycle_data = {
+                        "cycle_number": cycle_data.get("cycle_number", "?"),
+                        "weeks_in_cycle": cycle_data.get("weeks_in_cycle", 0),
+                        "day_totals": export_day_totals,
+                    }
+
+                # Prepare recent weeks data
+                export_recent_weeks = []
+                if recent_weeks:
+                    for week in recent_weeks:
+                        week_stats = (
+                            session.query(DuelWeeklyStats)
+                            .filter(
+                                DuelWeeklyStats.week_id == week.id,
+                                DuelWeeklyStats.player_id == selected_player_id,
+                            )
+                            .first()
+                        )
+                        points_str = f"{week_stats.raw_points:,.0f}" if week_stats else "-"
+                        export_recent_weeks.append(
+                            {
+                                "week": f"Week {week.week_number}",
+                                "opponent": week.opponent_name or "TBD",
+                                "result": (week.result or "pending").upper(),
+                                "points": points_str,
+                            }
+                        )
+
+                card_data = PlayerCardData(
+                    player_name=player.name,
+                    player_rank=player.rank,
+                    tier=tier,
+                    reliability=reliability,
+                    avg_normalized=avg_normalized,
+                    is_active=player.is_active,
+                    officer_role=player.officer_role,
+                    power=player.power,
+                    level=player.level,
+                    kill_count=player.kill_count,
+                    current_week_data=export_current_week_data,
+                    cycle_data=export_cycle_data,
+                    recent_weeks=export_recent_weeks,
+                )
+
+                export_cols = st.columns(2)
+                with export_cols[0]:
+                    png_bytes = generate_player_card_png(card_data)
+                    st.download_button(
+                        label="Download PNG",
+                        data=png_bytes,
+                        file_name=f"player_card_{player.name.replace(' ', '_')}.png",
+                        mime="image/png",
+                    )
+                with export_cols[1]:
+                    gif_bytes = generate_player_card_gif(card_data)
+                    st.download_button(
+                        label="Download Animated GIF",
+                        data=gif_bytes,
+                        file_name=f"player_card_{player.name.replace(' ', '_')}.gif",
+                        mime="image/gif",
+                    )
 
                 # === Placeholder Sections (Coming Soon) ===
                 st.markdown("---")
@@ -1353,7 +1541,7 @@ elif page == "Update Kills":
 
     import pandas as pd
 
-    from src.data.models import KillHistory, Player
+    from src.data.models import KillHistory, KillImport, Player
     from src.data.storage import get_session, init_database
 
     init_database()
@@ -1361,6 +1549,114 @@ elif page == "Update Kills":
     # Show current total kills
     total_kills = get_total_alliance_kills()
     st.metric("Total Alliance Kills", f"{total_kills:,}")
+
+    # --- Previous Imports Section ---
+    st.markdown("---")
+    st.subheader("Previous Imports")
+
+    with get_session() as session:
+        imports = session.query(KillImport).order_by(KillImport.recorded_at.desc()).all()
+        if imports:
+            import_data = []
+            for imp in imports:
+                import_data.append(
+                    {
+                        "id": imp.id,
+                        "Label": imp.label,
+                        "Date": imp.recorded_at.strftime("%Y-%m-%d %H:%M"),
+                        "Players": imp.player_count,
+                        "Created": imp.created_at.strftime("%Y-%m-%d %H:%M"),
+                    }
+                )
+
+            # Display imports table with delete buttons
+            for imp_row in import_data:
+                col1, col2, col3, col4, col5 = st.columns([3, 2, 1, 2, 1])
+                with col1:
+                    st.text(imp_row["Label"])
+                with col2:
+                    st.text(imp_row["Date"])
+                with col3:
+                    st.text(str(imp_row["Players"]))
+                with col4:
+                    st.text(imp_row["Created"])
+                with col5:
+                    if st.button("Delete", key=f"del_import_{imp_row['id']}"):
+                        st.session_state["delete_import_id"] = imp_row["id"]
+                        st.session_state["delete_import_label"] = imp_row["Label"]
+
+            # Delete confirmation dialog
+            if st.session_state.get("delete_import_id"):
+                st.warning(
+                    f"Are you sure you want to delete import "
+                    f"'{st.session_state['delete_import_label']}'? "
+                    "This will remove all associated kill history records."
+                )
+                confirm_label = st.text_input(
+                    "Type the import label to confirm deletion:",
+                    key="delete_confirm_label",
+                )
+                col_confirm, col_cancel = st.columns(2)
+                with col_confirm:
+                    if st.button("Confirm Delete", type="primary"):
+                        if confirm_label == st.session_state["delete_import_label"]:
+                            with get_session() as del_session:
+                                import_to_delete = del_session.query(KillImport).get(
+                                    st.session_state["delete_import_id"]
+                                )
+                                if import_to_delete:
+                                    del_session.delete(import_to_delete)
+                                    del_session.commit()
+                                    st.success("Import deleted successfully!")
+                            # Clear state
+                            del st.session_state["delete_import_id"]
+                            del st.session_state["delete_import_label"]
+                            if "delete_confirm_label" in st.session_state:
+                                del st.session_state["delete_confirm_label"]
+                            st.rerun()
+                        else:
+                            st.error("Label does not match. Deletion cancelled.")
+                with col_cancel:
+                    if st.button("Cancel"):
+                        del st.session_state["delete_import_id"]
+                        del st.session_state["delete_import_label"]
+                        if "delete_confirm_label" in st.session_state:
+                            del st.session_state["delete_confirm_label"]
+                        st.rerun()
+        else:
+            st.info("No previous imports found.")
+
+    # --- New Import Section ---
+    st.markdown("---")
+    st.subheader("New Import")
+
+    # Import label and date inputs
+    col_label, col_date, col_time = st.columns([3, 1, 1])
+    with col_label:
+        default_label = f"Import {datetime.now().strftime('%Y-%m-%d')}"
+        import_label = st.text_input(
+            "Import Label:",
+            value=default_label,
+            placeholder="Week 12 snapshot",
+            key="import_label",
+        )
+    with col_date:
+        import_date = st.date_input(
+            "Record Date:",
+            value=datetime.now().date(),
+            key="import_date",
+        )
+    with col_time:
+        import_time = st.time_input(
+            "Time:",
+            value=datetime.now().time().replace(second=0, microsecond=0),
+            key="import_time",
+        )
+
+    # Warn if future date
+    import_datetime = datetime.combine(import_date, import_time)
+    if import_datetime > datetime.now():
+        st.warning("Selected date/time is in the future.")
 
     st.markdown(
         "Paste kill count data to update player kill counts.\n\n"
@@ -1567,41 +1863,66 @@ elif page == "Update Kills":
         st.markdown(f"**{len(st.session_state['kills_matched'])} member(s)** ready to update.")
 
         if st.button("Update Kills", type="primary", key="update_kills_btn"):
-            try:
-                with get_session() as session:
-                    updated = 0
-                    now = datetime.now()
-                    for m in st.session_state["kills_matched"]:
-                        player = session.query(Player).get(m["player_id"])
-                        if player:
-                            # Create history record
-                            history = KillHistory(
-                                player_id=player.id,
-                                kill_count=m["new_kills"],
-                                recorded_at=now,
-                            )
-                            session.add(history)
+            # Validate import label
+            label = st.session_state.get("import_label", "").strip()
+            if not label:
+                st.error("Import label is required.")
+            else:
+                try:
+                    # Get import date/time from session state
+                    record_date = st.session_state.get("import_date", datetime.now().date())
+                    record_time = st.session_state.get(
+                        "import_time", datetime.now().time().replace(second=0, microsecond=0)
+                    )
+                    record_datetime = datetime.combine(record_date, record_time)
 
-                            # Update player
-                            player.kill_count = m["new_kills"]
-                            player.kill_count_updated_at = now
-                            updated += 1
-                    session.commit()
+                    with get_session() as session:
+                        # Create the import batch record
+                        kill_import = KillImport(
+                            label=label,
+                            recorded_at=record_datetime,
+                            player_count=len(st.session_state["kills_matched"]),
+                        )
+                        session.add(kill_import)
+                        session.flush()  # Get the import ID
 
-                st.success(f"Successfully updated {updated} member(s)!")
+                        updated = 0
+                        now = datetime.now()
+                        for m in st.session_state["kills_matched"]:
+                            player = session.query(Player).get(m["player_id"])
+                            if player:
+                                # Create history record linked to import
+                                history = KillHistory(
+                                    player_id=player.id,
+                                    kill_count=m["new_kills"],
+                                    recorded_at=record_datetime,
+                                    import_id=kill_import.id,
+                                )
+                                session.add(history)
 
-                # Clear session state
-                for key in [
-                    "kills_matched",
-                    "kills_unmatched",
-                    "kills_parse_errors",
-                ]:
-                    if key in st.session_state:
-                        del st.session_state[key]
+                                # Update player
+                                player.kill_count = m["new_kills"]
+                                player.kill_count_updated_at = now
+                                updated += 1
+                        session.commit()
 
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error updating kills: {e}")
+                    st.success(f"Successfully updated {updated} member(s)!")
+
+                    # Clear session state
+                    for key in [
+                        "kills_matched",
+                        "kills_unmatched",
+                        "kills_parse_errors",
+                        "import_label",
+                        "import_date",
+                        "import_time",
+                    ]:
+                        if key in st.session_state:
+                            del st.session_state[key]
+
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error updating kills: {e}")
 
 elif page == "Duel VS":
     st.header("Duel VS Tracker")
@@ -1786,9 +2107,22 @@ elif page == "Duel VS":
                                 "raw_points": "Points",
                                 "days_participated": "Days",
                                 "normalized_points": "Normalized",
+                                "kills_snapshot": "Kills",
+                                "kills_gained": "Kill Growth",
                             }
                         )
-                        df = df[["Player", "Points", "Days", "Normalized"]]
+
+                        # Format kills columns
+                        df["Kills"] = df["Kills"].apply(
+                            lambda x: f"{int(x):,}" if pd.notna(x) else "--"
+                        )
+                        df["Kill Growth"] = df["Kill Growth"].apply(
+                            lambda x: f"+{int(x):,}"
+                            if pd.notna(x) and x >= 0
+                            else (f"{int(x):,}" if pd.notna(x) else "--")
+                        )
+
+                        df = df[["Player", "Points", "Days", "Normalized", "Kills", "Kill Growth"]]
                         df["Points"] = df["Points"].astype(int)
                         df["Normalized"] = df["Normalized"].round(1)
 
@@ -2468,6 +2802,92 @@ elif page == "Analytics":
 
     st.subheader("Performance Trends")
     st.text("Add war results to see analytics.")
+
+elif page == "Settings":
+    st.header("Settings")
+
+    from src.data.storage import (
+        DEFAULT_RELIABILITY_THRESHOLD,
+        get_reliability_threshold,
+        init_database,
+        set_reliability_threshold,
+    )
+
+    init_database()
+
+    st.subheader("VS Combat Reliability Threshold")
+
+    # Get current threshold
+    current_threshold = get_reliability_threshold()
+
+    st.markdown(
+        """
+        The **reliability threshold** determines the minimum daily points a player must
+        score to have that day counted as "reliable" for VS combat participation.
+
+        **Reliability** is calculated as: `days meeting threshold / total days`
+
+        This affects player tier assignments in the rolling report.
+        """
+    )
+
+    # Display current threshold
+    current_threshold_m = current_threshold / 1_000_000
+    st.info(f"**Current threshold:** {current_threshold:,.0f} points ({current_threshold_m:.1f}M)")
+
+    # Input for new threshold
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        new_threshold_m = st.number_input(
+            "New threshold (in millions)",
+            min_value=0.0,
+            max_value=50.0,
+            value=current_threshold_m,
+            step=0.1,
+            format="%.1f",
+            help="Enter the threshold in millions (e.g., 7.2 for 7,200,000 points)",
+        )
+
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Save Threshold", type="primary"):
+            new_threshold = new_threshold_m * 1_000_000
+            set_reliability_threshold(new_threshold)
+            st.success(f"Threshold updated to {new_threshold:,.0f} points ({new_threshold_m:.1f}M)")
+            st.rerun()
+
+    # Reset to default button
+    default_threshold_m = DEFAULT_RELIABILITY_THRESHOLD / 1_000_000
+    if current_threshold != DEFAULT_RELIABILITY_THRESHOLD:
+        if st.button(
+            f"Reset to Default ({default_threshold_m:.1f}M)",
+            type="secondary",
+        ):
+            set_reliability_threshold(float(DEFAULT_RELIABILITY_THRESHOLD))
+            st.success(f"Threshold reset to default ({DEFAULT_RELIABILITY_THRESHOLD:,.0f} points)")
+            st.rerun()
+
+    # Explanation expander
+    with st.expander("How reliability affects tier assignments"):
+        st.markdown(
+            """
+            **Tier Thresholds:**
+            - **Core**: 90%+ reliability AND 150+ avg normalized points
+            - **Strong**: 75%+ reliability AND 100+ avg normalized points
+            - **Standard**: 50%+ reliability AND 50+ avg normalized points
+            - **Probation**: Below Standard thresholds
+
+            **Example:**
+            With a 7.2M threshold over 4 weeks (24 days total):
+            - A player who scores 7.2M+ on 22 days has 91.7% reliability (Core eligible)
+            - A player who scores 7.2M+ on 18 days has 75% reliability (Strong eligible)
+            - A player who scores 7.2M+ on 12 days has 50% reliability (Standard eligible)
+
+            **Note:** Players must meet BOTH the reliability AND normalized points thresholds
+            to qualify for a tier.
+            """
+        )
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Last War Butler Toolkit**")

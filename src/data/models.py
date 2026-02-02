@@ -124,6 +124,7 @@ class DuelWeeklyStats(Base):
     raw_points: Mapped[float] = mapped_column(Float, default=0.0)
     days_participated: Mapped[int] = mapped_column(Integer, default=0)  # 0-6
     normalized_points: Mapped[float] = mapped_column(Float, default=0.0)  # calculated
+    kills_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     # Relationships
@@ -195,6 +196,23 @@ class DuelCycleStats(Base):
     player: Mapped["Player"] = relationship("Player")
 
 
+class KillImport(Base):
+    """Tracks a batch import of kill counts."""
+
+    __tablename__ = "kill_imports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    label: Mapped[str] = mapped_column(String(200), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    player_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    # Relationship to history records
+    history_records: Mapped["List[KillHistory]"] = relationship(
+        "KillHistory", back_populates="import_batch", cascade="all, delete-orphan"
+    )
+
+
 class KillHistory(Base):
     """Historical kill count tracking for players."""
 
@@ -204,6 +222,27 @@ class KillHistory(Base):
     player_id: Mapped[int] = mapped_column(Integer, ForeignKey("players.id"), nullable=False)
     kill_count: Mapped[int] = mapped_column(Integer, nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    import_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("kill_imports.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     player: Mapped["Player"] = relationship("Player")
+    import_batch: Mapped["KillImport | None"] = relationship(
+        "KillImport", back_populates="history_records"
+    )
+
+
+class Setting(Base):
+    """Application settings stored in database."""
+
+    __tablename__ = "settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    value: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )

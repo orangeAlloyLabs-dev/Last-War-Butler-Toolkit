@@ -17,8 +17,7 @@ from .models import (
     DuelWeeklyStats,
     Player,
 )
-from .storage import get_session, init_database
-
+from .storage import get_reliability_threshold, get_session, init_database
 
 # Tier thresholds (configurable)
 TIER_THRESHOLDS = {
@@ -30,16 +29,75 @@ TIER_THRESHOLDS = {
 
 ROLLING_WEEKS = 4  # Number of weeks for rolling calculations
 ARCHIVE_WEEKS = 8  # Weeks before archiving
+DAYS_PER_WEEK = 6  # Monday through Saturday
 
 
-def calculate_normalized_points(raw_points: float, days_participated: int) -> float:
-    """Normalize points by days participated."""
-    return raw_points / max(1, days_participated)
+def calculate_normalized_points(raw_points: float) -> float:
+    """Normalize points by total days in a week (6 days)."""
+    return raw_points / DAYS_PER_WEEK
 
 
-def calculate_reliability(weeks_participated: int, total_weeks: int) -> float:
-    """Calculate participation reliability over rolling window."""
-    return weeks_participated / max(1, total_weeks)
+def calculate_reliability(
+    player_id: int,
+    weeks: int = ROLLING_WEEKS,
+    threshold: float | None = None,
+    session: Session | None = None,
+) -> float:
+    """Calculate participation reliability based on daily threshold scoring.
+
+    Reliability is the proportion of days where the player met or exceeded
+    the configured threshold over the rolling window.
+
+    Args:
+        player_id: The player's database ID
+        weeks: Number of weeks to look back (default: ROLLING_WEEKS)
+        threshold: Points threshold per day (default: from settings)
+        session: Optional existing database session
+
+    Returns:
+        Float between 0.0 and 1.0 representing reliability
+    """
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    try:
+        # Get threshold from settings if not provided
+        if threshold is None:
+            threshold = get_reliability_threshold(session=session)
+
+        # Get recent weeks
+        recent_weeks = get_recent_weeks(count=weeks, session=session)
+        if not recent_weeks:
+            return 0.0
+
+        # Get all days for these weeks
+        week_ids = [w.id for w in recent_weeks]
+        days = session.query(DuelDay).filter(DuelDay.week_id.in_(week_ids)).all()
+        if not days:
+            return 0.0
+
+        day_ids = [d.id for d in days]
+        total_days = len(day_ids)
+
+        # Get player's daily stats for these days
+        daily_stats = (
+            session.query(DuelDailyStats)
+            .filter(
+                DuelDailyStats.player_id == player_id,
+                DuelDailyStats.day_id.in_(day_ids),
+            )
+            .all()
+        )
+
+        # Count days meeting threshold
+        reliable_days = sum(1 for stat in daily_stats if stat.points >= threshold)
+
+        return reliable_days / max(1, total_days)
+    finally:
+        if close_session:
+            session.close()
 
 
 def assign_tier(avg_normalized: float, reliability: float) -> str:
@@ -1043,12 +1101,17 @@ def record_player_stats(
             .first()
         )
 
-        normalized = calculate_normalized_points(raw_points, days_participated)
+        normalized = calculate_normalized_points(raw_points)
+
+        # Capture current kill count from player
+        player = session.query(Player).filter(Player.id == player_id).first()
+        kills_snapshot = player.kill_count if player else None
 
         if existing:
             existing.raw_points = raw_points
             existing.days_participated = days_participated
             existing.normalized_points = normalized
+            existing.kills_snapshot = kills_snapshot
             session.commit()
             session.refresh(existing)
             return existing
@@ -1059,6 +1122,7 @@ def record_player_stats(
                 raw_points=raw_points,
                 days_participated=days_participated,
                 normalized_points=normalized,
+                kills_snapshot=kills_snapshot,
             )
             session.add(stats)
             session.commit()
@@ -1206,9 +1270,28 @@ def get_weekly_report(week_id: int, session: Session | None = None) -> dict:
 
         stats = session.query(DuelWeeklyStats).filter(DuelWeeklyStats.week_id == week_id).all()
 
+        # Get previous week for kill growth calculation
+        prev_week = (
+            session.query(DuelWeek)
+            .filter(DuelWeek.week_number < week.week_number)
+            .order_by(desc(DuelWeek.week_number))
+            .first()
+        )
+        prev_kills_map: dict[int, int | None] = {}
+        if prev_week:
+            prev_stats = (
+                session.query(DuelWeeklyStats).filter(DuelWeeklyStats.week_id == prev_week.id).all()
+            )
+            prev_kills_map = {s.player_id: s.kills_snapshot for s in prev_stats}
+
         player_stats = []
         for stat in stats:
             player = session.query(Player).filter(Player.id == stat.player_id).first()
+            kills_snapshot = stat.kills_snapshot
+            prev_kills = prev_kills_map.get(stat.player_id)
+            kills_gained = None
+            if kills_snapshot is not None and prev_kills is not None:
+                kills_gained = kills_snapshot - prev_kills
             player_stats.append(
                 {
                     "player_id": stat.player_id,
@@ -1216,6 +1299,8 @@ def get_weekly_report(week_id: int, session: Session | None = None) -> dict:
                     "raw_points": stat.raw_points,
                     "days_participated": stat.days_participated,
                     "normalized_points": stat.normalized_points,
+                    "kills_snapshot": kills_snapshot,
+                    "kills_gained": kills_gained,
                 }
             )
 
@@ -1253,6 +1338,9 @@ def get_rolling_report(
         week_ids = [w.id for w in recent_weeks]
         total_weeks = len(week_ids)
 
+        # Get threshold once for all players
+        threshold = get_reliability_threshold(session=session)
+
         # Get players (active only by default)
         query = session.query(Player)
         if active_only:
@@ -1271,9 +1359,15 @@ def get_rolling_report(
                 .all()
             )
 
+            # Calculate reliability using daily-based threshold
+            reliability = calculate_reliability(
+                player.id, weeks=weeks, threshold=threshold, session=session
+            )
+
             weeks_participated = len(stats)
             if weeks_participated == 0:
                 # Player didn't participate in any recent weeks
+                tier = assign_tier(0.0, reliability)
                 result.append(
                     {
                         "player_id": player.id,
@@ -1282,15 +1376,14 @@ def get_rolling_report(
                         "total_weeks": total_weeks,
                         "avg_raw_points": 0.0,
                         "avg_normalized_points": 0.0,
-                        "reliability": 0.0,
-                        "tier": "Probation",
+                        "reliability": round(reliability, 2),
+                        "tier": tier,
                     }
                 )
                 continue
 
             avg_raw = sum(s.raw_points for s in stats) / weeks_participated
             avg_normalized = sum(s.normalized_points for s in stats) / weeks_participated
-            reliability = calculate_reliability(weeks_participated, total_weeks)
             tier = assign_tier(avg_normalized, reliability)
 
             result.append(
@@ -1323,6 +1416,9 @@ def get_text_summary(week_id: int | None = None, session: Session | None = None)
         init_database()
         session = get_session()
 
+    # Weekly quota threshold (7.2M per day * 6 days = 43.2M)
+    weekly_quota = 43_200_000
+
     try:
         if week_id is None:
             week = get_latest_week(session=session)
@@ -1349,25 +1445,57 @@ def get_text_summary(week_id: int | None = None, session: Session | None = None)
 
         lines.append("")
 
-        # Top 5 contributors
+        # Get player ranks for filtering
+        player_ranks = {}
+        for p in report["players"]:
+            player = session.query(Player).filter(Player.id == p["player_id"]).first()
+            if player:
+                player_ranks[p["player_id"]] = player.rank
+
+        # Top 10 contributors (excluding rank 4 and 5)
         players = report["players"]
-        lines.append("Top 5 Contributors:")
-        for i, p in enumerate(players[:5], 1):
+        eligible_players = [p for p in players if player_ranks.get(p["player_id"], 0) not in (4, 5)]
+        lines.append("Top 10 Contributors (R1-R3):")
+        for i, p in enumerate(eligible_players[:10], 1):
+            rank = player_ranks.get(p["player_id"], "?")
             lines.append(
-                f"{i}. {p['player_name']} - {p['raw_points']:.0f} pts "
+                f"{i}. {p['player_name']} (R{rank}) - {p['raw_points']:.0f} pts "
                 f"({p['normalized_points']:.1f} norm)"
             )
 
         lines.append("")
 
-        # Under minimum threshold (< 50 normalized)
-        under_minimum = [p for p in players if p["normalized_points"] < 50]
-        if under_minimum:
-            lines.append("Under Minimum (< 50 norm):")
-            for p in under_minimum:
-                lines.append(f"- {p['player_name']} ({p['normalized_points']:.1f} norm)")
+        # Kill Growth section
+        players_with_kills = [
+            p for p in players if p.get("kills_gained") is not None and p["kills_gained"] > 0
+        ]
+        if players_with_kills:
+            # Sort by kills gained descending
+            players_with_kills.sort(key=lambda x: x["kills_gained"], reverse=True)
+            lines.append("Kill Growth This Week:")
+            for i, p in enumerate(players_with_kills[:10], 1):
+                kills_snapshot = p.get("kills_snapshot", 0) or 0
+                kills_gained = p.get("kills_gained", 0) or 0
+                prev_kills = kills_snapshot - kills_gained
+                lines.append(
+                    f"{i}. {p['player_name']}: +{kills_gained:,} kills "
+                    f"({prev_kills:,} -> {kills_snapshot:,})"
+                )
+            lines.append("")
+
+        # Players under weekly quota (< 43.2M total points)
+        under_quota = [p for p in players if p["raw_points"] < weekly_quota]
+        if under_quota:
+            lines.append(f"Under Weekly Quota (< {weekly_quota / 1_000_000:.1f}M):")
+            for p in under_quota:
+                rank = player_ranks.get(p["player_id"], "?")
+                deficit = weekly_quota - p["raw_points"]
+                lines.append(
+                    f"- {p['player_name']} (R{rank}): {p['raw_points']:,.0f} pts "
+                    f"(need {deficit:,.0f} more)"
+                )
         else:
-            lines.append("No players under minimum threshold.")
+            lines.append("All players met the weekly quota!")
 
         return "\n".join(lines)
     finally:
@@ -1877,6 +2005,177 @@ def get_all_players_current_week_daily_points(
                 result[stat.player_id][day.day_number] = stat.points
 
         return result
+    finally:
+        if close_session:
+            session.close()
+
+
+def get_player_kill_history(
+    player_id: int, limit: int = 20, session: Session | None = None
+) -> list[dict]:
+    """Get kill history for a player from weekly stats snapshots.
+
+    Returns list of {"date": datetime, "kills": int, "week_number": int} sorted by date.
+    """
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    try:
+        from .models import KillHistory
+
+        history = []
+
+        # Get kill history from KillHistory table
+        kill_records = (
+            session.query(KillHistory)
+            .filter(KillHistory.player_id == player_id)
+            .order_by(desc(KillHistory.recorded_at))
+            .limit(limit)
+            .all()
+        )
+
+        for record in kill_records:
+            history.append(
+                {
+                    "date": record.recorded_at,
+                    "kills": record.kill_count,
+                    "source": "history",
+                }
+            )
+
+        # Also get from weekly stats snapshots for additional data points
+        weekly_stats = (
+            session.query(DuelWeeklyStats)
+            .filter(
+                DuelWeeklyStats.player_id == player_id,
+                DuelWeeklyStats.kills_snapshot.isnot(None),
+            )
+            .all()
+        )
+
+        for stat in weekly_stats:
+            week = session.query(DuelWeek).filter(DuelWeek.id == stat.week_id).first()
+            if week:
+                history.append(
+                    {
+                        "date": week.start_date,
+                        "kills": stat.kills_snapshot,
+                        "week_number": week.week_number,
+                        "source": "weekly_stats",
+                    }
+                )
+
+        # Sort by date descending and deduplicate by date
+        history.sort(key=lambda x: x["date"], reverse=True)
+
+        # Deduplicate - keep first (most recent) entry for each date
+        seen_dates = set()
+        unique_history = []
+        for entry in history:
+            date_key = entry["date"].date() if hasattr(entry["date"], "date") else entry["date"]
+            if date_key not in seen_dates:
+                seen_dates.add(date_key)
+                unique_history.append(entry)
+
+        # Return up to limit entries, sorted by date ascending for charting
+        return sorted(unique_history[:limit], key=lambda x: x["date"])
+    finally:
+        if close_session:
+            session.close()
+
+
+def get_player_kill_growth_metrics(player_id: int, session: Session | None = None) -> dict:
+    """Calculate kill growth metrics for a player.
+
+    Returns:
+        {
+            "current_kills": int,
+            "kills_gained_since_last": int,
+            "last_updated": datetime | None,
+            "avg_weekly_growth": float,
+            "recent_weeks": [{"week": int, "kills_start": int, "kills_end": int, "gained": int}]
+        }
+    """
+    close_session = session is None
+    if session is None:
+        init_database()
+        session = get_session()
+
+    try:
+        player = session.query(Player).filter(Player.id == player_id).first()
+        if not player:
+            return {
+                "current_kills": 0,
+                "kills_gained_since_last": 0,
+                "last_updated": None,
+                "avg_weekly_growth": 0.0,
+                "recent_weeks": [],
+            }
+
+        current_kills = player.kill_count
+        last_updated = player.kill_count_updated_at
+
+        # Get weekly stats with kill snapshots, ordered by week number
+        weekly_stats = (
+            session.query(DuelWeeklyStats)
+            .join(DuelWeek, DuelWeeklyStats.week_id == DuelWeek.id)
+            .filter(
+                DuelWeeklyStats.player_id == player_id,
+                DuelWeeklyStats.kills_snapshot.isnot(None),
+            )
+            .order_by(desc(DuelWeek.week_number))
+            .all()
+        )
+
+        # Calculate kills gained since last snapshot
+        kills_gained_since_last = 0
+        if weekly_stats and weekly_stats[0].kills_snapshot is not None:
+            kills_gained_since_last = current_kills - weekly_stats[0].kills_snapshot
+
+        # Build recent weeks data
+        recent_weeks = []
+        weekly_growth_values = []
+        for i, stat in enumerate(weekly_stats[:8]):  # Look at up to 8 recent weeks
+            week = session.query(DuelWeek).filter(DuelWeek.id == stat.week_id).first()
+            if not week:
+                continue
+
+            kills_end = stat.kills_snapshot
+            kills_start = None
+            gained = None
+
+            # Find previous week's kills
+            if i + 1 < len(weekly_stats):
+                prev_stat = weekly_stats[i + 1]
+                if prev_stat.kills_snapshot is not None:
+                    kills_start = prev_stat.kills_snapshot
+                    gained = kills_end - kills_start
+                    if gained >= 0:
+                        weekly_growth_values.append(gained)
+
+            recent_weeks.append(
+                {
+                    "week": week.week_number,
+                    "kills_start": kills_start,
+                    "kills_end": kills_end,
+                    "gained": gained,
+                }
+            )
+
+        # Calculate average weekly growth
+        avg_weekly_growth = 0.0
+        if weekly_growth_values:
+            avg_weekly_growth = sum(weekly_growth_values) / len(weekly_growth_values)
+
+        return {
+            "current_kills": current_kills,
+            "kills_gained_since_last": kills_gained_since_last,
+            "last_updated": last_updated,
+            "avg_weekly_growth": avg_weekly_growth,
+            "recent_weeks": recent_weeks[:4],  # Return up to 4 recent weeks
+        }
     finally:
         if close_session:
             session.close()
