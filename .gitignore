@@ -49,6 +49,7 @@ htmlcov/
 # Local data storage
 data/*
 !data/.gitkeep
+!data/lastwar.db
 
 # OS files
 .DS_Store
