@@ -12,19 +12,20 @@ class CardStyle:
     height: int = 1000
 
     # Colors - Dark theme matching dashboard
-    bg_gradient_start: tuple[int, int, int] = (26, 26, 46)  # #1a1a2e
-    bg_gradient_end: tuple[int, int, int] = (22, 33, 62)  # #16213e
-    card_bg: tuple[int, int, int, int] = (255, 255, 255, 13)  # rgba(255,255,255,0.05)
-    border_color: tuple[int, int, int, int] = (255, 255, 255, 26)  # rgba(255,255,255,0.1)
+    bg_gradient_start: tuple[int, int, int] = (11, 11, 26)  # #0b0b1a
+    bg_gradient_end: tuple[int, int, int] = (17, 24, 39)  # #111827
+    card_bg: tuple[int, int, int, int] = (30, 30, 56, 255)  # #1e1e38
+    border_color: tuple[int, int, int, int] = (42, 42, 74, 255)  # #2a2a4a
 
     # Text colors
     text_primary: tuple[int, int, int] = (255, 255, 255)
-    text_secondary: tuple[int, int, int] = (153, 153, 153)  # rgba(255,255,255,0.6)
-    text_muted: tuple[int, int, int] = (128, 128, 128)  # rgba(255,255,255,0.5)
+    text_secondary: tuple[int, int, int] = (156, 163, 175)  # #9ca3af
+    text_muted: tuple[int, int, int] = (107, 114, 128)  # #6b7280
 
     # Accent colors
     accent_gradient_start: tuple[int, int, int] = (102, 126, 234)  # #667eea
     accent_gradient_end: tuple[int, int, int] = (118, 75, 162)  # #764ba2
+    accent_amber: tuple[int, int, int] = (245, 158, 11)  # #f59e0b
 
     # Status colors
     color_success: tuple[int, int, int] = (34, 197, 94)  # #22c55e

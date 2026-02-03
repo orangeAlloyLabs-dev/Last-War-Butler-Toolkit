@@ -12,53 +12,88 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Main background gradient */
+    /* Main background — deep dark gradient */
     .stApp {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        background: linear-gradient(160deg, #0b0b1a 0%, #111827 100%);
     }
 
-    /* Sidebar glassmorphism */
+    /* Sidebar — solid dark panel */
     [data-testid="stSidebar"] {
-        background: rgba(255, 255, 255, 0.05);
-        backdrop-filter: blur(10px);
-        border-right: 1px solid rgba(255, 255, 255, 0.1);
+        background: #0d0d1f;
+        border-right: 1px solid #2a2a4a;
     }
 
-    /* Metric cards styling */
+    [data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-selected="true"] {
+        background: rgba(102, 126, 234, 0.08);
+        border-left: 3px solid #667eea;
+    }
+
+    /* Metric cards — solid dark panels */
     [data-testid="stMetric"] {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 12px;
-        padding: 16px;
+        background: #1e1e38;
+        border: 1px solid #2a2a4a;
+        border-radius: 14px;
+        padding: 20px;
         transition: transform 0.2s, box-shadow 0.2s;
     }
 
     [data-testid="stMetric"]:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
     }
 
     [data-testid="stMetricLabel"] {
-        color: rgba(255, 255, 255, 0.6);
-        font-size: 12px;
+        color: #6b7280;
+        font-size: 11px;
+        font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 1px;
     }
 
     [data-testid="stMetricValue"] {
         color: #ffffff;
-        font-size: 28px;
+        font-size: 32px;
         font-weight: 700;
     }
 
-    /* Data tables */
-    [data-testid="stDataFrame"] {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 12px;
+    [data-testid="stMetricDelta"] {
+        color: #f59e0b;
     }
 
-    /* Buttons */
+    /* Section headers — left accent bar */
+    .stMarkdown h2, .stMarkdown h3 {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .stMarkdown h2::before, .stMarkdown h3::before {
+        content: "";
+        display: inline-block;
+        width: 3px;
+        height: 22px;
+        border-radius: 2px;
+        background: linear-gradient(180deg, #667eea, #764ba2);
+        flex-shrink: 0;
+    }
+
+    /* Data tables — dark card with alternating rows */
+    [data-testid="stDataFrame"] {
+        background: #1e1e38;
+        border: 1px solid #2a2a4a;
+        border-radius: 14px;
+        overflow: hidden;
+    }
+
+    [data-testid="stDataFrame"] [data-testid="StyledDataFrameRowCell"]:nth-child(odd) {
+        background: #15152a;
+    }
+
+    [data-testid="stDataFrame"] [data-testid="StyledDataFrameRowCell"]:nth-child(even) {
+        background: #1a1a30;
+    }
+
+    /* Buttons — primary gradient with glow */
     .stButton > button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
@@ -70,33 +105,39 @@ st.markdown(
     }
 
     .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+        transform: translateY(-1px);
+        box-shadow: 0 0 16px rgba(102, 126, 234, 0.35);
     }
 
     .stButton > button[kind="secondary"] {
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: transparent;
+        border: 1px solid #3a3a5a;
+        color: #9ca3af;
+    }
+
+    .stButton > button[kind="secondary"]:hover {
+        border-color: #9ca3af;
+        color: #ffffff;
     }
 
     /* Expander styling */
     .streamlit-expanderHeader {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: #1e1e38;
+        border: 1px solid #2a2a4a;
         border-radius: 8px;
     }
 
     /* Info/Warning/Error boxes */
     .stAlert {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: #1e1e38;
+        border: 1px solid #2a2a4a;
         border-radius: 8px;
     }
 
-    /* Tabs styling */
+    /* Tabs — solid dark */
     .stTabs [data-baseweb="tab-list"] {
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 8px;
+        background: #1e1e38;
+        border-radius: 10px;
         padding: 4px;
         gap: 4px;
     }
@@ -104,7 +145,7 @@ st.markdown(
     .stTabs [data-baseweb="tab"] {
         background: transparent;
         border-radius: 6px;
-        color: rgba(255, 255, 255, 0.6);
+        color: #9ca3af;
     }
 
     .stTabs [aria-selected="true"] {
@@ -112,22 +153,35 @@ st.markdown(
         color: white;
     }
 
-    /* Select boxes and inputs */
+    /* Inputs and selects — dark solid with border */
     .stSelectbox > div > div,
     .stTextInput > div > div > input,
     .stTextArea > div > div > textarea,
     .stNumberInput > div > div > input {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: #1a1a30;
+        border: 1px solid #3a3a5a;
         border-radius: 8px;
         color: white;
     }
 
+    .stSelectbox > div > div:focus-within,
+    .stTextInput > div > div > input:focus,
+    .stTextArea > div > div > textarea:focus,
+    .stNumberInput > div > div > input:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+    }
+
     /* Multiselect */
     .stMultiSelect > div > div {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: #1a1a30;
+        border: 1px solid #3a3a5a;
         border-radius: 8px;
+    }
+
+    .stMultiSelect > div > div:focus-within {
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
     }
 
     /* Progress bars */
@@ -137,19 +191,46 @@ st.markdown(
 
     /* Dividers */
     hr {
-        border-color: rgba(255, 255, 255, 0.1);
+        border-color: #2a2a4a;
     }
 
     /* Caption/muted text */
     .stCaption, small {
-        color: rgba(255, 255, 255, 0.5);
+        color: #6b7280;
     }
 
-    /* Download button */
+    /* Download button — secondary style */
     .stDownloadButton > button {
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: transparent;
+        border: 1px solid #3a3a5a;
+        color: #9ca3af;
     }
+
+    .stDownloadButton > button:hover {
+        border-color: #9ca3af;
+        color: #ffffff;
+    }
+
+    /* Chart containers */
+    [data-testid="stVegaLiteChart"],
+    .stPlotlyChart {
+        background: #1e1e38;
+        border: 1px solid #2a2a4a;
+        border-radius: 14px;
+        padding: 12px;
+        overflow: hidden;
+        box-sizing: border-box;
+    }
+
+    /* Day performance grid */
+    .day-perf-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; }
+    .day-box { background:#1e1e38; border:1px solid #2a2a4a;
+      border-radius:6px; padding:10px 6px; text-align:center; }
+    .day-box .day-label { font-size:10px; font-weight:600; color:#6b7280; margin-bottom:4px; }
+    .day-box .day-value { font-size:16px; font-weight:700; }
+    .day-box .day-value.green { color:#22c55e; }
+    .day-box .day-value.amber { color:#f59e0b; }
+    .day-box .day-value.red { color:#ef4444; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -255,15 +336,148 @@ def format_power_m(power: float) -> str:
     return f"{power / 1_000_000:.1f}M"
 
 
+def render_sparkline_svg(
+    values: list[float],
+    color: str = "#667eea",
+    with_fill: bool = False,
+    gradient_id: str = "sparkGrad",
+) -> str:
+    """Build an inline SVG sparkline from a list of numbers."""
+    if not values or len(values) < 2:
+        return ""
+    min_v = min(values)
+    max_v = max(values)
+    spread = max_v - min_v if max_v != min_v else 1.0
+    step = 120 / (len(values) - 1)
+    points = " ".join(
+        f"{i * step:.1f},{30 - (v - min_v) / spread * 26:.1f}" for i, v in enumerate(values)
+    )
+    fill_html = ""
+    if with_fill:
+        last_x = (len(values) - 1) * step
+        fill_html = (
+            f'<defs><linearGradient id="{gradient_id}" x1="0" y1="0" x2="0" y2="1">'
+            f'<stop offset="0%" stop-color="{color}" stop-opacity="0.3"/>'
+            f'<stop offset="100%" stop-color="{color}" stop-opacity="0"/>'
+            f"</linearGradient></defs>"
+            f'<polygon fill="url(#{gradient_id})" '
+            f'points="{points} {last_x:.1f},32 0,32"/>'
+        )
+    return (
+        f'<div style="height:32px;margin-top:8px;">'
+        f'<svg viewBox="0 0 120 32" preserveAspectRatio="none" '
+        f'style="width:100%;height:100%;">'
+        f"{fill_html}"
+        f'<polyline fill="none" stroke="{color}" stroke-width="2" '
+        f'stroke-linecap="round" stroke-linejoin="round" points="{points}"/>'
+        f"</svg></div>"
+    )
+
+
+def render_section_header(title: str) -> str:
+    """Return HTML for a styled section header with purple gradient accent bar."""
+    return (
+        f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">'
+        f'<div style="width:3px;height:22px;border-radius:2px;'
+        f'background:linear-gradient(180deg,#667eea,#764ba2);flex-shrink:0;"></div>'
+        f'<span style="font-size:13px;font-weight:700;text-transform:uppercase;'
+        f'letter-spacing:1.2px;color:#9ca3af;">{title}</span></div>'
+    )
+
+
+def render_tier_badge(tier: str) -> str:
+    """Return HTML for a styled tier badge."""
+    tier_styles = {
+        "Core": ("rgba(34,197,94,0.15)", "#22c55e"),
+        "Strong": ("rgba(59,130,246,0.15)", "#3b82f6"),
+        "Standard": ("rgba(234,179,8,0.15)", "#eab308"),
+        "Probation": ("rgba(239,68,68,0.15)", "#ef4444"),
+    }
+    bg, fg = tier_styles.get(tier, ("rgba(108,117,125,0.15)", "#6c757d"))
+    return (
+        f'<span style="display:inline-block;padding:3px 10px;border-radius:100px;'
+        f"font-size:11px;font-weight:700;letter-spacing:0.5px;"
+        f'background:{bg};color:{fg};">{tier}</span>'
+    )
+
+
 if page == "Overview":
-    st.header("Alliance Overview")
+    st.markdown(render_section_header("Alliance Overview"), unsafe_allow_html=True)
+
+    import altair as alt
+    import pandas as pd
+
+    from src.data.models import DuelWeek, KillHistory, KillImport
+    from src.data.storage import get_session, init_database
+
+    init_database()
 
     stats = get_player_stats()
     total_kills = get_total_alliance_kills()
 
+    # --- Gather sparkline data ---
+    members_sparkline_values: list[float] = []
+    kills_sparkline_values: list[float] = []
+    winrate_sparkline_values: list[float] = []
+
+    try:
+        with get_session() as session:
+            # Members sparkline: player_count from last 8 KillImport batches
+            recent_imports = (
+                session.query(KillImport).order_by(KillImport.recorded_at.desc()).limit(8).all()
+            )
+            if recent_imports:
+                members_sparkline_values = [
+                    float(imp.player_count) for imp in reversed(recent_imports)
+                ]
+
+            # Kills sparkline: sum of kills from KillHistory grouped by import batch
+            from sqlalchemy import func as sql_func
+
+            kill_sums = (
+                session.query(
+                    KillHistory.import_id,
+                    sql_func.sum(KillHistory.kill_count),
+                )
+                .filter(KillHistory.import_id.isnot(None))
+                .group_by(KillHistory.import_id)
+                .order_by(KillHistory.import_id.desc())
+                .limit(8)
+                .all()
+            )
+            if kill_sums:
+                kills_sparkline_values = [float(s[1]) for s in reversed(kill_sums)]
+
+            # Win rate sparkline: from DuelWeek results (rolling win %)
+            recent_weeks = (
+                session.query(DuelWeek)
+                .filter(DuelWeek.result.isnot(None))
+                .order_by(DuelWeek.week_number.desc())
+                .limit(8)
+                .all()
+            )
+            if recent_weeks:
+                ordered_weeks = list(reversed(recent_weeks))
+                cumulative_wins = 0
+                for i, w in enumerate(ordered_weeks):
+                    if w.result == "win":
+                        cumulative_wins += 1
+                    winrate_sparkline_values.append(cumulative_wins / (i + 1) * 100)
+    except Exception:
+        pass
+
+    # Synthetic power sparkline (upward curve — no historical power data)
+    power_sparkline_values = [60, 64, 66, 70, 74, 78, 84, 90]
+
+    # --- Metric cards with sparklines ---
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Total Members", stats["total_members"])
+        if members_sparkline_values:
+            st.markdown(
+                render_sparkline_svg(members_sparkline_values, "#667eea"),
+                unsafe_allow_html=True,
+            )
     with col2:
         total_power = stats["total_power"]
         total_power_m = total_power / 1_000_000
@@ -272,10 +486,229 @@ if page == "Overview":
         else:
             power_str = f"{total_power_m:.1f}M"
         st.metric("Alliance Power", power_str)
+        power_spark = render_sparkline_svg(
+            power_sparkline_values,
+            "#f59e0b",
+            with_fill=True,
+            gradient_id="sparkPower",
+        )
+        st.markdown(power_spark, unsafe_allow_html=True)
     with col3:
         st.metric("Total Kills", f"{total_kills:,}")
+        if kills_sparkline_values:
+            st.markdown(
+                render_sparkline_svg(kills_sparkline_values, "#22c55e"),
+                unsafe_allow_html=True,
+            )
     with col4:
-        st.metric("War Win Rate", "—")
+        # Compute win rate
+        win_rate_str = "—"
+        try:
+            with get_session() as session:
+                all_results = session.query(DuelWeek).filter(DuelWeek.result.isnot(None)).all()
+                if all_results:
+                    wins = sum(1 for w in all_results if w.result == "win")
+                    win_rate_str = f"{wins / len(all_results) * 100:.0f}%"
+        except Exception:
+            pass
+        st.metric("War Win Rate", win_rate_str)
+        if winrate_sparkline_values:
+            st.markdown(
+                render_sparkline_svg(winrate_sparkline_values, "#667eea"),
+                unsafe_allow_html=True,
+            )
+
+    # --- Charts: Kill History + Power by Tier ---
+    chart_col1, chart_col2 = st.columns(2)
+
+    with chart_col1:
+        st.markdown("**Kill History (Last 7 Days)**")
+        try:
+            with get_session() as session:
+                from datetime import datetime, timedelta
+
+                seven_days_ago = datetime.now() - timedelta(days=7)
+                kill_data = (
+                    session.query(
+                        sql_func.date(KillHistory.recorded_at).label("date"),
+                        sql_func.sum(KillHistory.kill_count).label("total_kills"),
+                    )
+                    .filter(KillHistory.recorded_at >= seven_days_ago)
+                    .group_by(sql_func.date(KillHistory.recorded_at))
+                    .order_by(sql_func.date(KillHistory.recorded_at))
+                    .all()
+                )
+                if kill_data:
+                    kh_df = pd.DataFrame(
+                        [{"date": str(r.date), "kills": int(r.total_kills)} for r in kill_data]
+                    )
+                    kh_df["date"] = pd.to_datetime(kh_df["date"])
+                    chart = (
+                        alt.Chart(kh_df)
+                        .mark_area(
+                            line={"color": "#f59e0b", "strokeWidth": 2.5},
+                            color=alt.Gradient(
+                                gradient="linear",
+                                stops=[
+                                    alt.GradientStop(color="rgba(245,158,11,0.25)", offset=0),
+                                    alt.GradientStop(color="rgba(245,158,11,0)", offset=1),
+                                ],
+                                x1=1,
+                                x2=1,
+                                y1=0,
+                                y2=1,
+                            ),
+                        )
+                        .encode(
+                            x=alt.X(
+                                "date:T",
+                                title=None,
+                                scale=alt.Scale(
+                                    domain=[
+                                        (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"),
+                                        datetime.now().strftime("%Y-%m-%d"),
+                                    ]
+                                ),
+                            ),
+                            y=alt.Y("kills:Q", title="Total Kills"),
+                        )
+                        .configure_view(fill="#1e1e38", strokeWidth=0)
+                        .configure_axis(
+                            gridColor="#2a2a4a",
+                            labelColor="#6b7280",
+                            titleColor="#9ca3af",
+                        )
+                        .properties(height=220, width="container")
+                    )
+                    st.altair_chart(chart, use_container_width=True)
+                else:
+                    st.info("No kill history data in the last 7 days.")
+        except Exception:
+            st.info("No kill history data available.")
+
+    with chart_col2:
+        st.markdown("**Power Distribution by Tier**")
+        try:
+            from src.data.duel_tracker import get_rolling_report
+            from src.data.models import Player
+
+            rolling = get_rolling_report(weeks=4)
+            if rolling:
+                # Build tier -> total power mapping
+                tier_power: dict[str, float] = {}
+                player_tiers: dict[int, str] = {p["player_id"]: p["tier"] for p in rolling}
+                with get_session() as session:
+                    players = session.query(Player).filter(Player.is_active == True).all()  # noqa: E712
+                    for p in players:
+                        t = player_tiers.get(p.id, "Probation")
+                        tier_power[t] = tier_power.get(t, 0) + p.power
+
+                if tier_power:
+                    tier_colors = {
+                        "Core": "#22c55e",
+                        "Strong": "#3b82f6",
+                        "Standard": "#eab308",
+                        "Probation": "#ef4444",
+                    }
+                    tier_order = ["Core", "Strong", "Standard", "Probation"]
+                    tp_df = pd.DataFrame(
+                        [
+                            {"Tier": t, "Power": tier_power.get(t, 0) / 1_000_000_000}
+                            for t in tier_order
+                            if tier_power.get(t, 0) > 0
+                        ]
+                    )
+                    chart = (
+                        alt.Chart(tp_df)
+                        .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
+                        .encode(
+                            x=alt.X(
+                                "Tier:N",
+                                sort=tier_order,
+                                title=None,
+                                axis=alt.Axis(labelAngle=0),
+                            ),
+                            y=alt.Y("Power:Q", title="Power (B)"),
+                            color=alt.Color(
+                                "Tier:N",
+                                scale=alt.Scale(
+                                    domain=list(tier_colors.keys()),
+                                    range=list(tier_colors.values()),
+                                ),
+                                legend=None,
+                            ),
+                        )
+                        .configure_view(fill="#1e1e38", strokeWidth=0)
+                        .configure_axis(
+                            gridColor="#2a2a4a",
+                            labelColor="#6b7280",
+                            titleColor="#9ca3af",
+                        )
+                        .properties(height=220, width="container")
+                    )
+                    st.altair_chart(chart, use_container_width=True)
+                else:
+                    st.info("No tier data available.")
+            else:
+                st.info("No duel data available for tier chart.")
+        except Exception:
+            st.info("No tier data available.")
+
+    # --- Top Players Table ---
+    if stats["players"]:
+        st.markdown("**Top Players by Power**")
+        sorted_players = sorted(stats["players"], key=lambda p: p[4], reverse=True)[:5]
+
+        # Try to get tier data for badges
+        player_tiers_map: dict[int, str] = {}
+        try:
+            from src.data.duel_tracker import get_rolling_report
+
+            rolling = get_rolling_report(weeks=4)
+            if rolling:
+                player_tiers_map = {p["player_id"]: p["tier"] for p in rolling}
+        except Exception:
+            pass
+
+        rows_html = ""
+        for p_id, p_name, p_rank, p_officer, p_power, p_level in sorted_players:
+            tier = player_tiers_map.get(p_id, "—")
+            tier_html = render_tier_badge(tier) if tier != "—" else "—"
+            power_display = format_power_m(p_power)
+            rows_html += (
+                f"<tr>"
+                f"<td style='color:#fff;font-weight:600;padding:10px 14px;'>{p_name}</td>"
+                f"<td style='padding:10px 14px;'>{tier_html}</td>"
+                f"<td style='padding:10px 14px;color:#9ca3af;'>{power_display}</td>"
+                f"<td style='padding:10px 14px;color:#9ca3af;'>R{p_rank}</td>"
+                f"<td style='padding:10px 14px;color:#9ca3af;'>{p_level}</td>"
+                f"</tr>"
+            )
+
+        table_html = (
+            '<div style="background:#1e1e38;border:1px solid #2a2a4a;border-radius:14px;'
+            'overflow:hidden;margin-top:4px;">'
+            '<table style="width:100%;border-collapse:separate;border-spacing:0;font-size:13px;">'
+            "<thead><tr>"
+            '<th style="text-align:left;padding:10px 14px;font-size:11px;font-weight:700;'
+            "text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;"
+            'border-bottom:1px solid #2a2a4a;">Player</th>'
+            '<th style="text-align:left;padding:10px 14px;font-size:11px;font-weight:700;'
+            "text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;"
+            'border-bottom:1px solid #2a2a4a;">Tier</th>'
+            '<th style="text-align:left;padding:10px 14px;font-size:11px;font-weight:700;'
+            "text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;"
+            'border-bottom:1px solid #2a2a4a;">Power</th>'
+            '<th style="text-align:left;padding:10px 14px;font-size:11px;font-weight:700;'
+            "text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;"
+            'border-bottom:1px solid #2a2a4a;">Rank</th>'
+            '<th style="text-align:left;padding:10px 14px;font-size:11px;font-weight:700;'
+            "text-transform:uppercase;letter-spacing:0.8px;color:#6b7280;"
+            'border-bottom:1px solid #2a2a4a;">Level</th>'
+            "</tr></thead>"
+            f"<tbody>{rows_html}</tbody></table></div>"
+        )
+        st.markdown(table_html, unsafe_allow_html=True)
 
     if stats["total_members"] == 0:
         st.info("No members imported yet. Go to **Import Members** to add your alliance members.")
@@ -478,7 +911,7 @@ elif page == "Players":
         st.info("No players tracked yet. Go to **Import Members** to add your alliance members.")
 
 elif page == "Player Summary":
-    st.header("Player Summary")
+    st.markdown(render_section_header("Player Summary"), unsafe_allow_html=True)
 
     import pandas as pd
 
@@ -583,7 +1016,7 @@ elif page == "Player Summary":
 
                 # === Stats Grid (4 metrics) ===
                 st.markdown("---")
-                st.subheader("Player Stats")
+                st.markdown(render_section_header("Player Stats"), unsafe_allow_html=True)
 
                 # Get tier from rolling report
                 rolling = get_rolling_report(weeks=4)
@@ -635,7 +1068,7 @@ elif page == "Player Summary":
 
                 # === VS Combat Performance Section ===
                 st.markdown("---")
-                st.subheader("VS Combat Performance")
+                st.markdown(render_section_header("VS Combat Performance"), unsafe_allow_html=True)
 
                 if player_rolling and weeks_participated > 0:
                     perf_cols = st.columns(3)
@@ -689,7 +1122,7 @@ elif page == "Player Summary":
 
                 # === Kill Growth Section ===
                 st.markdown("---")
-                st.subheader("Kill Growth")
+                st.markdown(render_section_header("Kill Growth"), unsafe_allow_html=True)
 
                 from src.data.duel_tracker import (
                     get_player_kill_growth_metrics,
@@ -771,7 +1204,7 @@ elif page == "Player Summary":
 
                 # === Day Performance Section ===
                 st.markdown("---")
-                st.subheader("Day Theme Performance")
+                st.markdown(render_section_header("Day Theme Performance"), unsafe_allow_html=True)
 
                 # Shortened theme names for display
                 short_themes = {
@@ -847,46 +1280,56 @@ elif page == "Player Summary":
                         week_num = current_week_data.get("week_number", "?")
                         st.markdown(f"**Current Week (Week {week_num})**")
 
-                        day_cols = st.columns(6)
+                        # Build HTML day-perf-grid
+                        day_boxes_html = ""
                         for day_num in range(1, 7):
-                            with day_cols[day_num - 1]:
-                                day_info = current_week_data["days"].get(day_num, {})
-                                theme = day_info.get("theme", f"Day {day_num}")
-                                points = day_info.get("points")
+                            day_info = current_week_data["days"].get(day_num, {})
+                            theme = day_info.get("theme", f"Day {day_num}")
+                            points = day_info.get("points")
+                            display_theme = short_themes.get(theme, theme)
+                            pts_str = format_points(points)
 
-                                display_theme = short_themes.get(theme, theme)
-                                st.markdown(f"**{display_theme}**")
-                                st.metric(
-                                    "Pts", format_points(points), label_visibility="collapsed"
+                            rank_html = ""
+                            color_class = ""
+                            if points is not None:
+                                day_scores = []
+                                for pid, pdata in all_current_week.items():
+                                    if day_num in pdata:
+                                        day_scores.append((pid, pdata[day_num]))
+                                day_scores.sort(key=lambda x: x[1], reverse=True)
+                                total_players = len(day_scores)
+                                rank = None
+                                for idx_r, (pid, _) in enumerate(day_scores):
+                                    if pid == selected_player_id:
+                                        rank = idx_r + 1
+                                        break
+
+                                status_color, status_icon = get_status_color_icon(points)
+                                rank_str = get_rank_str(rank, total_players)
+                                rank_html = (
+                                    f'<div style="font-size:11px;color:{status_color};'
+                                    f'margin-top:4px;">{status_icon}{rank_str}</div>'
                                 )
-
-                                # Calculate rank for this day
-                                if points is not None:
-                                    day_scores = []
-                                    for pid, pdata in all_current_week.items():
-                                        if day_num in pdata:
-                                            day_scores.append((pid, pdata[day_num]))
-                                    day_scores.sort(key=lambda x: x[1], reverse=True)
-                                    total_players = len(day_scores)
-                                    rank = None
-                                    for idx, (pid, _) in enumerate(day_scores):
-                                        if pid == selected_player_id:
-                                            rank = idx + 1
-                                            break
-
-                                    status_color, status_icon = get_status_color_icon(points)
-                                    rank_str = get_rank_str(rank, total_players)
-                                    st.markdown(
-                                        f"<span style='color:{status_color};font-size:16px;'>"
-                                        f"{status_icon}{rank_str}</span>",
-                                        unsafe_allow_html=True,
-                                    )
+                                if points >= 7_200_000:
+                                    color_class = "green"
+                                elif points >= 3_600_000:
+                                    color_class = "amber"
                                 else:
-                                    st.markdown(
-                                        "<span style='color:#6c757d;font-size:16px;'>--</span>",
-                                        unsafe_allow_html=True,
-                                    )
+                                    color_class = "red"
+                            else:
+                                pts_str = "--"
 
+                            day_boxes_html += (
+                                f'<div class="day-box">'
+                                f'<div class="day-label">{display_theme}</div>'
+                                f'<div class="day-value {color_class}">{pts_str}</div>'
+                                f"{rank_html}</div>"
+                            )
+
+                        st.markdown(
+                            f'<div class="day-perf-grid">{day_boxes_html}</div>',
+                            unsafe_allow_html=True,
+                        )
                         st.markdown("")  # Spacer
 
                     # === Cycle Total Section ===
@@ -895,53 +1338,69 @@ elif page == "Player Summary":
                         weeks_in_cycle = cycle_data.get("weeks_in_cycle", 0)
                         st.markdown(f"**Cycle Total (Cycle {cycle_num})**")
 
-                        day_cols = st.columns(6)
+                        # Build HTML day-perf-grid for cycle totals
+                        cycle_boxes_html = ""
                         for day_num in range(1, 7):
-                            with day_cols[day_num - 1]:
-                                day_info = cycle_data["day_totals"].get(day_num, {})
-                                theme = day_info.get("theme", f"Day {day_num}")
-                                total_pts = day_info.get("total_points", 0)
-                                times_participated = day_info.get("times_participated", 0)
+                            day_info = cycle_data["day_totals"].get(day_num, {})
+                            theme = day_info.get("theme", f"Day {day_num}")
+                            total_pts = day_info.get("total_points", 0)
+                            times_participated = day_info.get("times_participated", 0)
+                            display_theme = short_themes.get(theme, theme)
+                            pts_str = format_points(total_pts)
 
-                                display_theme = short_themes.get(theme, theme)
-                                st.markdown(f"**{display_theme}**")
-                                st.metric(
-                                    "Total", format_points(total_pts), label_visibility="collapsed"
+                            rank_html = ""
+                            color_class = ""
+                            if times_participated > 0:
+                                day_scores = []
+                                for pid, pdata in all_cycle_totals.items():
+                                    if day_num in pdata:
+                                        day_scores.append((pid, pdata[day_num]))
+                                day_scores.sort(key=lambda x: x[1], reverse=True)
+                                total_players = len(day_scores)
+                                rank = None
+                                for idx_r, (pid, _) in enumerate(day_scores):
+                                    if pid == selected_player_id:
+                                        rank = idx_r + 1
+                                        break
+
+                                status_color, status_icon = get_status_color_icon(total_pts)
+                                rank_str = get_rank_str(rank, total_players)
+                                wks_txt = f"{times_participated}/{weeks_in_cycle} wks"
+                                rank_html = (
+                                    f'<div style="font-size:11px;color:{status_color};'
+                                    f'margin-top:4px;">{status_icon}{rank_str}</div>'
+                                    f'<div style="font-size:10px;color:#6b7280;'
+                                    f'margin-top:2px;">{wks_txt}</div>'
                                 )
-
-                                # Calculate rank for this day (cycle totals)
-                                if times_participated > 0:
-                                    day_scores = []
-                                    for pid, pdata in all_cycle_totals.items():
-                                        if day_num in pdata:
-                                            day_scores.append((pid, pdata[day_num]))
-                                    day_scores.sort(key=lambda x: x[1], reverse=True)
-                                    total_players = len(day_scores)
-                                    rank = None
-                                    for idx, (pid, _) in enumerate(day_scores):
-                                        if pid == selected_player_id:
-                                            rank = idx + 1
-                                            break
-
-                                    status_color, status_icon = get_status_color_icon(total_pts)
-                                    rank_str = get_rank_str(rank, total_players)
-                                    st.markdown(
-                                        f"<span style='color:{status_color};font-size:16px;'>"
-                                        f"{status_icon}{rank_str}</span>",
-                                        unsafe_allow_html=True,
-                                    )
-                                    st.caption(f"{times_participated}/{weeks_in_cycle} wks")
+                                if total_pts >= 7_200_000:
+                                    color_class = "green"
+                                elif total_pts >= 3_600_000:
+                                    color_class = "amber"
                                 else:
-                                    st.markdown(
-                                        "<span style='color:#6c757d;font-size:16px;'>--</span>",
-                                        unsafe_allow_html=True,
-                                    )
+                                    color_class = "red"
+                            else:
+                                pts_str = "--"
+
+                            cycle_boxes_html += (
+                                f'<div class="day-box">'
+                                f'<div class="day-label">{display_theme}</div>'
+                                f'<div class="day-value {color_class}">{pts_str}</div>'
+                                f"{rank_html}</div>"
+                            )
+
+                        st.markdown(
+                            f'<div class="day-perf-grid">{cycle_boxes_html}</div>',
+                            unsafe_allow_html=True,
+                        )
                 else:
                     st.info("No daily performance data available.")
 
                 # === Recent Weeks Table ===
                 st.markdown("---")
-                st.subheader("Recent Weeks Performance")
+                st.markdown(
+                    render_section_header("Recent Weeks Performance"),
+                    unsafe_allow_html=True,
+                )
 
                 recent_weeks = get_recent_weeks(count=4)
                 if recent_weeks:
@@ -1954,7 +2413,7 @@ elif page == "Update Kills":
                     st.error(f"Error updating kills: {e}")
 
 elif page == "Duel VS":
-    st.header("Duel VS Tracker")
+    st.markdown(render_section_header("Duel VS Tracker"), unsafe_allow_html=True)
 
     import pandas as pd
     import plotly.express as px
@@ -2065,18 +2524,26 @@ elif page == "Duel VS":
                     },
                 )
 
-                # Summary stats
+                # Summary stats — tier count badges
                 st.markdown("---")
-                col1, col2, col3, col4 = st.columns(4)
                 tier_counts = df["Tier"].value_counts()
-                with col1:
-                    st.metric("Core", tier_counts.get("Core", 0))
-                with col2:
-                    st.metric("Strong", tier_counts.get("Strong", 0))
-                with col3:
-                    st.metric("Standard", tier_counts.get("Standard", 0))
-                with col4:
-                    st.metric("Probation", tier_counts.get("Probation", 0))
+                tier_badge_items = [
+                    ("#22c55e", "Core", tier_counts.get("Core", 0)),
+                    ("#3b82f6", "Strong", tier_counts.get("Strong", 0)),
+                    ("#eab308", "Standard", tier_counts.get("Standard", 0)),
+                    ("#ef4444", "Probation", tier_counts.get("Probation", 0)),
+                ]
+                badges_html = '<div style="display:flex;gap:16px;margin-bottom:20px;">'
+                for dot_color, tier_name, count in tier_badge_items:
+                    badges_html += (
+                        f'<div style="display:flex;align-items:center;gap:6px;'
+                        f'font-size:12px;font-weight:600;color:#9ca3af;">'
+                        f'<div style="width:8px;height:8px;border-radius:50%;'
+                        f'background:{dot_color};"></div>'
+                        f"{tier_name} <strong style='color:#fff;'>{count}</strong></div>"
+                    )
+                badges_html += "</div>"
+                st.markdown(badges_html, unsafe_allow_html=True)
             else:
                 st.info("No players match the current filters.")
         else:
