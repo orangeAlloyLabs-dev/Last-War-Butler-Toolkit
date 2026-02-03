@@ -698,7 +698,7 @@ elif page == "Player Summary":
 
                 kill_metrics = get_player_kill_growth_metrics(selected_player_id)
 
-                if kill_metrics["current_kills"] > 0 or kill_metrics["recent_weeks"]:
+                if kill_metrics["current_kills"] > 0 or kill_metrics["recent_imports"]:
                     # Kill growth metrics row
                     kill_cols = st.columns(3)
                     with kill_cols[0]:
@@ -712,28 +712,57 @@ elif page == "Player Summary":
                         st.metric("Avg Weekly Growth", f"+{avg_growth:,.0f}")
 
                     # Kill history chart
-                    kill_history = get_player_kill_history(selected_player_id)
+                    st.markdown("**Kill History**")
+                    range_option = st.selectbox(
+                        "Date Range",
+                        options=["1 Week", "4 Weeks", "Lifetime"],
+                        index=0,
+                        key="kill_history_range",
+                    )
+                    days_map = {"1 Week": 7, "4 Weeks": 28, "Lifetime": None}
+                    kill_history = get_player_kill_history(
+                        selected_player_id, days=days_map[range_option]
+                    )
                     if kill_history and len(kill_history) > 1:
-                        st.markdown("**Kill History**")
                         kill_df = pd.DataFrame(kill_history)
-                        kill_df["date"] = pd.to_datetime(kill_df["date"])
-                        st.line_chart(kill_df.set_index("date")["kills"])
+                        kill_df["date"] = pd.to_datetime(kill_df["date"]).dt.normalize()
+                        kill_df = kill_df.set_index("date")
 
-                    # Recent weeks kill progression
-                    if kill_metrics["recent_weeks"]:
-                        st.markdown("**Recent Weeks**")
-                        weeks_data = []
-                        for wk in kill_metrics["recent_weeks"]:
-                            gained_str = f"+{wk['gained']:,}" if wk["gained"] is not None else "--"
-                            weeks_data.append(
+                        # Build a date range spanning the full selected period
+                        selected_days = days_map[range_option]
+                        if selected_days is not None:
+                            range_start = pd.Timestamp.now().normalize() - pd.Timedelta(
+                                days=selected_days
+                            )
+                        else:
+                            range_start = kill_df.index.min()
+                        full_range = pd.date_range(
+                            range_start, pd.Timestamp.now().normalize(), freq="D"
+                        )
+                        kill_df = kill_df.reindex(full_range)
+
+                        st.line_chart(kill_df["kills"])
+                    else:
+                        st.info("Not enough data points for the selected range.")
+
+                    # Recent imports kill progression
+                    if kill_metrics["recent_imports"]:
+                        st.markdown("**Recent Imports**")
+                        imports_data = []
+                        for imp in kill_metrics["recent_imports"]:
+                            gained_str = (
+                                f"+{imp['gained']:,}" if imp["gained"] is not None else "--"
+                            )
+                            date_str = imp["recorded_at"].strftime("%Y-%m-%d")
+                            imports_data.append(
                                 {
-                                    "Week": f"Week {wk['week']}",
-                                    "Kills": f"{wk['kills_end']:,}" if wk["kills_end"] else "--",
+                                    "Date": date_str,
+                                    "Kills": f"{imp['kill_count']:,}",
                                     "Growth": gained_str,
                                 }
                             )
                         st.dataframe(
-                            pd.DataFrame(weeks_data),
+                            pd.DataFrame(imports_data),
                             hide_index=True,
                             use_container_width=True,
                         )
@@ -1902,7 +1931,7 @@ elif page == "Update Kills":
 
                                 # Update player
                                 player.kill_count = m["new_kills"]
-                                player.kill_count_updated_at = now
+                                player.kill_count_updated_at = record_datetime
                                 updated += 1
                         session.commit()
 
