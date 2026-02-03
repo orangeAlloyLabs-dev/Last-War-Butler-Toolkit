@@ -2011,16 +2011,23 @@ def get_all_players_current_week_daily_points(
 
 
 def get_player_kill_history(
-    player_id: int, limit: int = 20, session: Session | None = None
+    player_id: int, days: int | None = 7, session: Session | None = None
 ) -> list[dict]:
     """Get kill history for a player from weekly stats snapshots.
 
-    Returns list of {"date": datetime, "kills": int, "week_number": int} sorted by date.
+    Args:
+        player_id: The player's ID.
+        days: Number of days to look back (7, 28, or None for lifetime).
+        session: Optional SQLAlchemy session.
+
+    Returns list of {"date": datetime, "kills": int} sorted by date.
     """
     close_session = session is None
     if session is None:
         init_database()
         session = get_session()
+
+    cutoff_date = datetime.now() - timedelta(days=days) if days is not None else None
 
     try:
         from .models import KillHistory
@@ -2028,13 +2035,10 @@ def get_player_kill_history(
         history = []
 
         # Get kill history from KillHistory table
-        kill_records = (
-            session.query(KillHistory)
-            .filter(KillHistory.player_id == player_id)
-            .order_by(desc(KillHistory.recorded_at))
-            .limit(limit)
-            .all()
-        )
+        query = session.query(KillHistory).filter(KillHistory.player_id == player_id)
+        if cutoff_date is not None:
+            query = query.filter(KillHistory.recorded_at >= cutoff_date)
+        kill_records = query.order_by(desc(KillHistory.recorded_at)).all()
 
         for record in kill_records:
             history.append(
@@ -2058,6 +2062,8 @@ def get_player_kill_history(
         for stat in weekly_stats:
             week = session.query(DuelWeek).filter(DuelWeek.id == stat.week_id).first()
             if week:
+                if cutoff_date is not None and week.start_date < cutoff_date:
+                    continue
                 history.append(
                     {
                         "date": week.start_date,
@@ -2067,27 +2073,22 @@ def get_player_kill_history(
                     }
                 )
 
-        # Sort by date descending and deduplicate by date
-        history.sort(key=lambda x: x["date"], reverse=True)
-
-        # Deduplicate - keep first (most recent) entry for each date
-        seen_dates = set()
-        unique_history = []
+        # Deduplicate by date - keep the entry with the highest kill count per day
+        best_by_date: dict = {}
         for entry in history:
             date_key = entry["date"].date() if hasattr(entry["date"], "date") else entry["date"]
-            if date_key not in seen_dates:
-                seen_dates.add(date_key)
-                unique_history.append(entry)
+            if date_key not in best_by_date or entry["kills"] > best_by_date[date_key]["kills"]:
+                best_by_date[date_key] = entry
+        unique_history = sorted(best_by_date.values(), key=lambda x: x["date"])
 
-        # Return up to limit entries, sorted by date ascending for charting
-        return sorted(unique_history[:limit], key=lambda x: x["date"])
+        return unique_history
     finally:
         if close_session:
             session.close()
 
 
 def get_player_kill_growth_metrics(player_id: int, session: Session | None = None) -> dict:
-    """Calculate kill growth metrics for a player.
+    """Calculate kill growth metrics for a player using KillHistory records.
 
     Returns:
         {
@@ -2095,7 +2096,7 @@ def get_player_kill_growth_metrics(player_id: int, session: Session | None = Non
             "kills_gained_since_last": int,
             "last_updated": datetime | None,
             "avg_weekly_growth": float,
-            "recent_weeks": [{"week": int, "kills_start": int, "kills_end": int, "gained": int}]
+            "recent_imports": [{"recorded_at": datetime, "kill_count": int, "gained": int | None}]
         }
     """
     close_session = session is None
@@ -2104,6 +2105,8 @@ def get_player_kill_growth_metrics(player_id: int, session: Session | None = Non
         session = get_session()
 
     try:
+        from .models import KillHistory
+
         player = session.query(Player).filter(Player.id == player_id).first()
         if not player:
             return {
@@ -2111,58 +2114,53 @@ def get_player_kill_growth_metrics(player_id: int, session: Session | None = Non
                 "kills_gained_since_last": 0,
                 "last_updated": None,
                 "avg_weekly_growth": 0.0,
-                "recent_weeks": [],
+                "recent_imports": [],
             }
 
         current_kills = player.kill_count
-        last_updated = player.kill_count_updated_at
 
-        # Get weekly stats with kill snapshots, ordered by week number
-        weekly_stats = (
-            session.query(DuelWeeklyStats)
-            .join(DuelWeek, DuelWeeklyStats.week_id == DuelWeek.id)
-            .filter(
-                DuelWeeklyStats.player_id == player_id,
-                DuelWeeklyStats.kills_snapshot.isnot(None),
-            )
-            .order_by(desc(DuelWeek.week_number))
+        # Get KillHistory records ordered by recorded_at descending
+        kill_records = (
+            session.query(KillHistory)
+            .filter(KillHistory.player_id == player_id)
+            .order_by(desc(KillHistory.recorded_at))
             .all()
         )
 
-        # Calculate kills gained since last snapshot
+        # last_updated from most recent KillHistory record
+        last_updated = kill_records[0].recorded_at if kill_records else None
+
+        # kills_gained_since_last: difference between two most recent records
         kills_gained_since_last = 0
-        if weekly_stats and weekly_stats[0].kills_snapshot is not None:
-            kills_gained_since_last = current_kills - weekly_stats[0].kills_snapshot
+        if len(kill_records) >= 2:
+            kills_gained_since_last = kill_records[0].kill_count - kill_records[1].kill_count
+        elif len(kill_records) == 1:
+            kills_gained_since_last = current_kills - kill_records[0].kill_count
 
-        # Build recent weeks data
-        recent_weeks = []
-        weekly_growth_values = []
-        for i, stat in enumerate(weekly_stats[:8]):  # Look at up to 8 recent weeks
-            week = session.query(DuelWeek).filter(DuelWeek.id == stat.week_id).first()
-            if not week:
-                continue
+        # Build recent_imports (up to 4) and calculate normalized weekly growth
+        recent_imports: list[dict] = []
+        weekly_growth_values: list[float] = []
 
-            kills_end = stat.kills_snapshot
-            kills_start = None
+        for i, record in enumerate(kill_records[:5]):  # 5 records to get 4 diffs
             gained = None
+            if i + 1 < len(kill_records):
+                prev_record = kill_records[i + 1]
+                gained = record.kill_count - prev_record.kill_count
 
-            # Find previous week's kills
-            if i + 1 < len(weekly_stats):
-                prev_stat = weekly_stats[i + 1]
-                if prev_stat.kills_snapshot is not None:
-                    kills_start = prev_stat.kills_snapshot
-                    gained = kills_end - kills_start
-                    if gained >= 0:
-                        weekly_growth_values.append(gained)
+                # Normalize to weekly growth for averaging
+                days_diff = (record.recorded_at - prev_record.recorded_at).total_seconds() / 86400
+                if days_diff > 0 and gained >= 0:
+                    weekly_growth = (gained / days_diff) * 7
+                    weekly_growth_values.append(weekly_growth)
 
-            recent_weeks.append(
-                {
-                    "week": week.week_number,
-                    "kills_start": kills_start,
-                    "kills_end": kills_end,
-                    "gained": gained,
-                }
-            )
+            if i < 4:  # Only include up to 4 in the output
+                recent_imports.append(
+                    {
+                        "recorded_at": record.recorded_at,
+                        "kill_count": record.kill_count,
+                        "gained": gained,
+                    }
+                )
 
         # Calculate average weekly growth
         avg_weekly_growth = 0.0
@@ -2174,7 +2172,7 @@ def get_player_kill_growth_metrics(player_id: int, session: Session | None = Non
             "kills_gained_since_last": kills_gained_since_last,
             "last_updated": last_updated,
             "avg_weekly_growth": avg_weekly_growth,
-            "recent_weeks": recent_weeks[:4],  # Return up to 4 recent weeks
+            "recent_imports": recent_imports,
         }
     finally:
         if close_session:
