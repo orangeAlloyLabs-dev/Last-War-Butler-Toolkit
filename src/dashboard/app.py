@@ -231,30 +231,182 @@ st.markdown(
     .day-box .day-value.green { color:#22c55e; }
     .day-box .day-value.amber { color:#f59e0b; }
     .day-box .day-value.red { color:#ef4444; }
+
+    /* --- Sidebar hierarchical navigation --- */
+    .sidebar-brand {
+        font-size: 18px;
+        font-weight: 700;
+        color: #ffffff;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 0 12px 0;
+    }
+
+    .nav-section-label {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: #6b7280;
+        letter-spacing: 1.5px;
+        padding: 12px 0 6px 0;
+    }
+
+    [data-testid="stSidebar"] .stButton {
+        width: 100% !important;
+        display: flex !important;
+        justify-content: flex-start !important;
+    }
+
+    [data-testid="stSidebar"] .stButton > button {
+        background: transparent !important;
+        border: none !important;
+        border-left: 3px solid transparent !important;
+        border-radius: 0 !important;
+        text-align: left !important;
+        font-size: 14px;
+        color: #9ca3af;
+        padding: 8px 12px 8px 20px !important;
+        width: 100%;
+        box-shadow: none !important;
+        transform: none !important;
+    }
+
+    [data-testid="stSidebar"] .stButton > button:hover {
+        color: #ffffff !important;
+        background: rgba(255, 255, 255, 0.04) !important;
+        transform: none !important;
+        box-shadow: none !important;
+    }
+
+    [data-testid="stSidebar"] .stButton > button[kind="primary"],
+    [data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"] {
+        color: #ffffff !important;
+        background: rgba(102, 126, 234, 0.08) !important;
+        border-left: 3px solid #667eea !important;
+    }
+
+    .nav-child-marker {
+        display: none;
+        height: 0;
+        margin: 0;
+        padding: 0;
+    }
+
+    .nav-child-marker + div .stButton > button {
+        padding-left: 52px !important;
+        font-size: 13px;
+    }
+
+    .sidebar-footer {
+        text-align: center;
+        color: #6b7280;
+        font-size: 12px;
+        padding: 8px 0;
+    }
+
+    .sidebar-version {
+        color: #4b5563;
+        font-size: 11px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
+# --- Navigation hierarchy ---
+NAV_STRUCTURE = [
+    {
+        "section": "Dashboard",
+        "items": [
+            {"icon": "◉", "label": "Overview", "page": "Overview", "children": []},
+            {"icon": "♛", "label": "Player Summary", "page": "Player Summary", "children": []},
+            {"icon": "⚔", "label": "Duel VS Report", "page": "Duel VS", "children": []},
+            {"icon": "📊", "label": "Analytics", "page": "Analytics", "children": []},
+            {"icon": "🏆", "label": "War Results", "page": "War Results", "children": []},
+        ],
+    },
+    {
+        "section": "Management",
+        "items": [
+            {
+                "icon": "👥",
+                "label": "Players",
+                "page": "Players",
+                "children": [
+                    {"label": "Import Members", "page": "Import Members"},
+                    {"label": "Update Kills", "page": "Update Kills"},
+                ],
+            },
+            {"icon": "⚙", "label": "Settings", "page": "Settings", "children": []},
+        ],
+    },
+]
+
+
+def _is_group_active(item: dict, current_page: str) -> bool:
+    """Check if a nav group (parent or any child) is the current page."""
+    if item["page"] == current_page:
+        return True
+    return any(c["page"] == current_page for c in item.get("children", []))
+
+
+def _navigate_to(page_name: str) -> None:
+    """Set the active page in session state."""
+    st.session_state["page"] = page_name
+
+
 st.title("Last War Butler Dashboard")
 st.markdown("---")
 
 # Sidebar navigation
-st.sidebar.title("Navigation")
-page = st.sidebar.radio(
-    "Go to",
-    [
-        "Overview",
-        "Players",
-        "Player Summary",
-        "Import Members",
-        "Update Kills",
-        "Duel VS",
-        "War Results",
-        "Analytics",
-        "Settings",
-    ],
+if "page" not in st.session_state:
+    st.session_state["page"] = "Overview"
+
+# Brand header
+st.sidebar.markdown(
+    '<div class="sidebar-brand">🏰 Last War Butler</div>',
+    unsafe_allow_html=True,
 )
+
+current_page = st.session_state["page"]
+
+for section in NAV_STRUCTURE:
+    st.sidebar.markdown(
+        f'<div class="nav-section-label">{section["section"]}</div>',
+        unsafe_allow_html=True,
+    )
+    for item in section["items"]:
+        group_active = _is_group_active(item, current_page)
+        is_active = item["page"] == current_page
+
+        st.sidebar.button(
+            f'{item["icon"]}  {item["label"]}',
+            key=f'nav_{item["page"]}',
+            on_click=_navigate_to,
+            args=(item["page"],),
+            use_container_width=True,
+            type="primary" if is_active else "secondary",
+        )
+
+        if group_active and item.get("children"):
+            for child in item["children"]:
+                is_child_active = child["page"] == current_page
+                # Marker div for CSS child-indentation
+                st.sidebar.markdown(
+                    '<div class="nav-child-marker"></div>',
+                    unsafe_allow_html=True,
+                )
+                st.sidebar.button(
+                    child["label"],
+                    key=f'nav_{child["page"]}',
+                    on_click=_navigate_to,
+                    args=(child["page"],),
+                    use_container_width=True,
+                    type="primary" if is_child_active else "secondary",
+                )
+
+page = st.session_state["page"]
 
 
 ALLIANCE_MEMBER_LIMIT = 100
@@ -3386,5 +3538,8 @@ elif page == "Settings":
         )
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Last War Butler Toolkit**")
-st.sidebar.markdown("v0.1.0")
+st.sidebar.markdown(
+    '<div class="sidebar-footer">Last War Butler Toolkit<br>'
+    '<span class="sidebar-version">v0.1.0</span></div>',
+    unsafe_allow_html=True,
+)
