@@ -110,6 +110,31 @@ def run_migrations(engine):
                 conn.execute(text("ALTER TABLE kill_history ADD COLUMN import_id INTEGER"))
                 conn.commit()
 
+    # Migration: Remove alliance_total column from duel_weeks (no longer in model)
+    if "duel_weeks" in inspector.get_table_names():
+        columns = [col["name"] for col in inspector.get_columns("duel_weeks")]
+        if "alliance_total" in columns:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "CREATE TABLE duel_weeks_new ("
+                    "id INTEGER NOT NULL PRIMARY KEY, "
+                    "week_number INTEGER NOT NULL, "
+                    "start_date DATETIME NOT NULL, "
+                    "opponent_name VARCHAR(100), "
+                    "result VARCHAR(10), "
+                    "cycle_id INTEGER REFERENCES duel_cycles(id), "
+                    "created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL)"
+                ))
+                conn.execute(text(
+                    "INSERT INTO duel_weeks_new "
+                    "(id, week_number, start_date, opponent_name, result, cycle_id, created_at) "
+                    "SELECT id, week_number, start_date, opponent_name, result, cycle_id, "
+                    "created_at FROM duel_weeks"
+                ))
+                conn.execute(text("DROP TABLE duel_weeks"))
+                conn.execute(text("ALTER TABLE duel_weeks_new RENAME TO duel_weeks"))
+                conn.commit()
+
 
 def init_database():
     """Initialize the database and create all tables."""
