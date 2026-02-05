@@ -1,5 +1,6 @@
 """Database storage and connection management."""
 
+import json
 import os
 from pathlib import Path
 
@@ -14,6 +15,17 @@ load_dotenv()
 
 # Default reliability threshold (7.2M points per day)
 DEFAULT_RELIABILITY_THRESHOLD = 7_200_000
+
+# Default event types for alliance scheduling
+DEFAULT_EVENT_TYPES = [
+    "Duel VS",
+    "Kill Event",
+    "Alliance War",
+    "Rally",
+    "Resource Event",
+    "Training Event",
+    "Custom",
+]
 
 
 def get_database_url() -> str:
@@ -241,5 +253,36 @@ def set_reliability_threshold(threshold: float, session: Session | None = None) 
         "reliability_threshold",
         str(threshold),
         description="Minimum daily points to count as a reliable day for VS combat",
+        session=session,
+    )
+
+
+def get_event_types(session: Session | None = None) -> list[str]:
+    """Get configured event types from settings.
+
+    Args:
+        session: Optional existing session
+
+    Returns:
+        List of event type strings
+    """
+    value = get_setting("event_types", json.dumps(DEFAULT_EVENT_TYPES), session=session)
+    return json.loads(value)
+
+
+def set_event_types(event_types: list[str], session: Session | None = None) -> Setting:
+    """Save event types to settings.
+
+    Args:
+        event_types: List of event type strings
+        session: Optional existing session
+
+    Returns:
+        The updated Setting object
+    """
+    return set_setting(
+        "event_types",
+        json.dumps(event_types),
+        description="Event type options for alliance scheduling",
         session=session,
     )

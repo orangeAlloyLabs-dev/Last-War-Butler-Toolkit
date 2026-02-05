@@ -246,3 +246,20 @@ class Setting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )
+
+
+class AllianceEvent(Base):
+    """Alliance event scheduling."""
+
+    __tablename__ = "alliance_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    start_datetime: Mapped[datetime] = mapped_column(DateTime, nullable=False)  # Stored in EST
+    end_datetime: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # Stored in EST
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
