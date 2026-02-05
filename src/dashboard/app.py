@@ -324,6 +324,7 @@ NAV_STRUCTURE = [
             {"icon": "⚔", "label": "Duel VS Report", "page": "Duel VS", "children": []},
             {"icon": "📊", "label": "Analytics", "page": "Analytics", "children": []},
             {"icon": "🏆", "label": "War Results", "page": "War Results", "children": []},
+            {"icon": "📅", "label": "Events", "page": "Events", "children": []},
         ],
     },
     {
@@ -381,8 +382,8 @@ for section in NAV_STRUCTURE:
         is_active = item["page"] == current_page
 
         st.sidebar.button(
-            f'{item["icon"]}  {item["label"]}',
-            key=f'nav_{item["page"]}',
+            f"{item['icon']}  {item['label']}",
+            key=f"nav_{item['page']}",
             on_click=_navigate_to,
             args=(item["page"],),
             use_container_width=True,
@@ -399,7 +400,7 @@ for section in NAV_STRUCTURE:
                 )
                 st.sidebar.button(
                     child["label"],
-                    key=f'nav_{child["page"]}',
+                    key=f"nav_{child['page']}",
                     on_click=_navigate_to,
                     args=(child["page"],),
                     use_container_width=True,
@@ -553,16 +554,162 @@ def render_tier_badge(tier: str) -> str:
     )
 
 
+def render_events_summary(
+    events: list,
+    event_type_icons: dict,
+    display_tz: str = "EST",
+    tz_options: dict | None = None,
+) -> str:
+    """Render compact events summary HTML grouped by day."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    if not events:
+        return (
+            '<div style="background:#1e1e38;border:1px solid #2a2a4a;border-radius:14px;'
+            'padding:20px;text-align:center;color:#6b7280;font-size:13px;">'
+            "No events scheduled for the next 7 days</div>"
+        )
+
+    # Timezone conversion helper
+    def convert_event_time(dt: datetime) -> datetime:
+        """Convert naive EST datetime to target timezone."""
+        if tz_options is None or display_tz == "EST":
+            return dt
+        est = ZoneInfo("America/New_York")
+        target = ZoneInfo(tz_options.get(display_tz, "America/New_York"))
+        aware_dt = dt.replace(tzinfo=est)
+        return aware_dt.astimezone(target)
+
+    # Group events by day label (using converted times for day grouping)
+    today = datetime.now().date()
+    grouped: dict[str, list] = {}
+
+    for event in events:
+        converted_dt = convert_event_time(event.start_datetime)
+        if hasattr(converted_dt, "date"):
+            event_date = converted_dt.date()
+        else:
+            event_date = event.start_datetime.date()
+        delta = (event_date - today).days
+
+        if delta == 0:
+            day_label = "Today"
+        elif delta == 1:
+            day_label = "Tomorrow"
+        else:
+            day_label = event_date.strftime("%A")  # Weekday name
+
+        if day_label not in grouped:
+            grouped[day_label] = []
+        grouped[day_label].append((event, converted_dt))
+
+    # Build HTML
+    html_parts = [
+        '<div style="background:#1e1e38;border:1px solid #2a2a4a;border-radius:14px;'
+        'overflow:hidden;">'
+    ]
+
+    for i, (day_label, day_events) in enumerate(grouped.items()):
+        # Day header
+        border_top = "border-top:1px solid #2a2a4a;" if i > 0 else ""
+        html_parts.append(
+            f'<div style="padding:10px 14px;{border_top}">'
+            f'<div style="font-size:11px;font-weight:700;text-transform:uppercase;'
+            f'letter-spacing:0.8px;color:#6b7280;margin-bottom:8px;">{day_label}</div>'
+        )
+
+        # Events for this day
+        for event, converted_dt in day_events:
+            icon = event_type_icons.get(event.event_type, "📅")
+            time_str = converted_dt.strftime("%-I:%M %p")
+            tz_label = f" {display_tz}" if display_tz != "EST" else ""
+            html_parts.append(
+                f'<div style="display:flex;align-items:center;gap:10px;padding:6px 0;'
+                f'font-size:13px;">'
+                f'<span style="flex-shrink:0;">{icon}</span>'
+                f'<span style="color:#667eea;min-width:85px;">{time_str}{tz_label}</span>'
+                f'<span style="color:#ffffff;">{event.title}</span>'
+                f"</div>"
+            )
+
+        html_parts.append("</div>")
+
+    html_parts.append("</div>")
+    return "".join(html_parts)
+
+
 if page == "Overview":
-    st.markdown(render_section_header("Alliance Overview"), unsafe_allow_html=True)
+    from datetime import datetime
 
     import altair as alt
     import pandas as pd
 
-    from src.data.models import DuelWeek, KillHistory, KillImport
+    from src.data.models import AllianceEvent, DuelWeek, KillHistory, KillImport
     from src.data.storage import get_session, init_database
 
     init_database()
+
+    # --- Upcoming Events Summary ---
+    from datetime import timedelta
+
+    # Timezone options for overview
+    OVERVIEW_TZ_OPTIONS = {
+        "EST": "America/New_York",
+        "BRT": "America/Sao_Paulo",
+        "KST": "Asia/Seoul",
+    }
+
+    # Header with timezone selector
+    tz_col1, tz_col2 = st.columns([3, 1])
+    with tz_col1:
+        st.markdown(render_section_header("Upcoming Events"), unsafe_allow_html=True)
+    with tz_col2:
+        selected_tz = st.selectbox(
+            "Timezone",
+            options=list(OVERVIEW_TZ_OPTIONS.keys()),
+            index=0,
+            key="overview_events_tz",
+            label_visibility="collapsed",
+        )
+
+    EVENT_TYPE_ICONS_OVERVIEW = {
+        "Duel VS": "⚔",
+        "Kill Event": "🎯",
+        "Alliance War": "🏰",
+        "Rally": "🚩",
+        "Resource Event": "📦",
+        "Training Event": "🏋",
+        "Custom": "📅",
+    }
+
+    try:
+        with get_session() as session:
+            now = datetime.now()
+            week_ahead = now + timedelta(days=7)
+            upcoming_events = (
+                session.query(AllianceEvent)
+                .filter(AllianceEvent.start_datetime >= now)
+                .filter(AllianceEvent.start_datetime <= week_ahead)
+                .order_by(AllianceEvent.start_datetime)
+                .all()
+            )
+            st.markdown(
+                render_events_summary(
+                    upcoming_events, EVENT_TYPE_ICONS_OVERVIEW, selected_tz, OVERVIEW_TZ_OPTIONS
+                ),
+                unsafe_allow_html=True,
+            )
+    except Exception:
+        st.markdown(
+            '<div style="background:#1e1e38;border:1px solid #2a2a4a;border-radius:14px;'
+            'padding:20px;text-align:center;color:#6b7280;font-size:13px;">'
+            "Unable to load events</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<div style='height:24px;'></div>", unsafe_allow_html=True)
+    st.markdown(render_section_header("Alliance Overview"), unsafe_allow_html=True)
 
     stats = get_player_stats()
     total_kills = get_total_alliance_kills()
@@ -3451,13 +3598,270 @@ elif page == "Analytics":
     st.subheader("Performance Trends")
     st.text("Add war results to see analytics.")
 
+elif page == "Events":
+    from datetime import date, datetime, time
+    from zoneinfo import ZoneInfo
+
+    from src.data.models import AllianceEvent
+    from src.data.storage import get_event_types, get_session, init_database
+
+    init_database()
+
+    st.header("Alliance Events")
+
+    # Timezone mapping
+    TIMEZONE_OPTIONS = {
+        "EST": "America/New_York",
+        "CST": "America/Chicago",
+        "MST": "America/Denver",
+        "PST": "America/Los_Angeles",
+        "UTC": "UTC",
+        "GMT": "Europe/London",
+        "BRT": "America/Sao_Paulo",
+        "KST": "Asia/Seoul",
+    }
+
+    # Event type icons for display
+    EVENT_TYPE_ICONS = {
+        "Duel VS": "⚔",
+        "Kill Event": "🎯",
+        "Alliance War": "🏰",
+        "Rally": "🚩",
+        "Resource Event": "📦",
+        "Training Event": "🏋",
+        "Custom": "📅",
+    }
+
+    def get_event_icon(event_type: str) -> str:
+        """Get icon for an event type."""
+        return EVENT_TYPE_ICONS.get(event_type, "📅")
+
+    def convert_to_display_tz(dt: datetime, display_tz: str) -> datetime:
+        """Convert naive EST datetime to display timezone."""
+        if dt is None:
+            return None
+        est = ZoneInfo("America/New_York")
+        target_tz = ZoneInfo(TIMEZONE_OPTIONS.get(display_tz, "America/New_York"))
+        # Treat stored datetime as EST
+        est_aware = dt.replace(tzinfo=est)
+        return est_aware.astimezone(target_tz)
+
+    def format_event_datetime(
+        start_dt: datetime,
+        end_dt: datetime | None,
+        display_tz: str,
+    ) -> str:
+        """Format event datetime range for display."""
+        start_converted = convert_to_display_tz(start_dt, display_tz)
+        start_str = start_converted.strftime("%a %b %d, %I:%M %p")
+
+        if end_dt:
+            end_converted = convert_to_display_tz(end_dt, display_tz)
+            # Check if same day
+            if start_converted.date() == end_converted.date():
+                end_str = end_converted.strftime("%I:%M %p")
+            else:
+                end_str = end_converted.strftime("%a %b %d, %I:%M %p")
+            return f"{start_str} - {end_str} {display_tz}"
+        return f"{start_str} {display_tz}"
+
+    # Timezone selector in header
+    col_header, col_tz = st.columns([3, 1])
+    with col_tz:
+        display_tz = st.selectbox(
+            "Display Timezone",
+            options=list(TIMEZONE_OPTIONS.keys()),
+            index=0,
+            key="events_display_tz",
+        )
+
+    # Get events from database
+    with get_session() as session:
+        now = datetime.now()
+        upcoming_events = (
+            session.query(AllianceEvent)
+            .filter(AllianceEvent.start_datetime >= now)
+            .order_by(AllianceEvent.start_datetime)
+            .all()
+        )
+        past_events = (
+            session.query(AllianceEvent)
+            .filter(AllianceEvent.start_datetime < now)
+            .order_by(AllianceEvent.start_datetime.desc())
+            .limit(20)
+            .all()
+        )
+
+        # Convert to dicts while session is open
+        upcoming_data = [
+            {
+                "id": e.id,
+                "title": e.title,
+                "description": e.description,
+                "event_type": e.event_type,
+                "start_datetime": e.start_datetime,
+                "end_datetime": e.end_datetime,
+            }
+            for e in upcoming_events
+        ]
+        past_data = [
+            {
+                "id": e.id,
+                "title": e.title,
+                "description": e.description,
+                "event_type": e.event_type,
+                "start_datetime": e.start_datetime,
+                "end_datetime": e.end_datetime,
+            }
+            for e in past_events
+        ]
+
+    # Upcoming Events section
+    st.subheader("Upcoming Events")
+
+    if not upcoming_data:
+        st.info("No upcoming events scheduled.")
+    else:
+        for event in upcoming_data:
+            with st.container():
+                col_icon, col_info, col_delete = st.columns([0.5, 8, 1.5])
+
+                with col_icon:
+                    st.markdown(
+                        f"<div style='font-size:24px;padding-top:8px;'>"
+                        f"{get_event_icon(event['event_type'])}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                with col_info:
+                    st.markdown(f"**{event['title']}**")
+                    st.caption(
+                        format_event_datetime(
+                            event["start_datetime"],
+                            event["end_datetime"],
+                            display_tz,
+                        )
+                    )
+                    if event["description"]:
+                        st.text(event["description"])
+
+                with col_delete:
+                    if st.button("🗑 Delete", key=f"delete_event_{event['id']}"):
+                        st.session_state[f"confirm_delete_{event['id']}"] = True
+
+                    if st.session_state.get(f"confirm_delete_{event['id']}", False):
+                        st.warning("Are you sure?")
+                        col_yes, col_no = st.columns(2)
+                        with col_yes:
+                            if st.button("Yes", key=f"confirm_yes_{event['id']}"):
+                                with get_session() as del_session:
+                                    evt = del_session.get(AllianceEvent, event["id"])
+                                    if evt:
+                                        del_session.delete(evt)
+                                        del_session.commit()
+                                st.session_state.pop(f"confirm_delete_{event['id']}", None)
+                                st.rerun()
+                        with col_no:
+                            if st.button("No", key=f"confirm_no_{event['id']}"):
+                                st.session_state.pop(f"confirm_delete_{event['id']}", None)
+                                st.rerun()
+
+                st.markdown("---")
+
+    # Add New Event section
+    st.subheader("Add New Event")
+    st.caption("All times are entered in EST (Eastern Standard Time)")
+
+    event_types = get_event_types()
+
+    with st.form("add_event_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            new_event_type = st.selectbox("Event Type", options=event_types)
+            new_title = st.text_input("Title", max_chars=200)
+
+        with col2:
+            new_description = st.text_area("Description (optional)", max_chars=1000, height=100)
+
+        st.markdown("**Event Time (EST)**")
+        col_start, col_end = st.columns(2)
+
+        with col_start:
+            st.markdown("Start")
+            start_date = st.date_input("Start Date", value=date.today(), key="start_date")
+            start_time = st.time_input("Start Time", value=time(8, 0), key="start_time")
+
+        with col_end:
+            st.markdown("End (optional)")
+            has_end_time = st.checkbox("Has end time", value=True)
+            if has_end_time:
+                end_date = st.date_input("End Date", value=date.today(), key="end_date")
+                end_time = st.time_input("End Time", value=time(22, 0), key="end_time")
+
+        submitted = st.form_submit_button("Add Event", type="primary")
+
+        if submitted:
+            if not new_title.strip():
+                st.error("Please enter an event title.")
+            else:
+                start_datetime = datetime.combine(start_date, start_time)
+                end_datetime = None
+                if has_end_time:
+                    end_datetime = datetime.combine(end_date, end_time)
+                    if end_datetime <= start_datetime:
+                        st.error("End time must be after start time.")
+                        st.stop()
+
+                with get_session() as session:
+                    new_event = AllianceEvent(
+                        title=new_title.strip(),
+                        description=new_description.strip() if new_description else None,
+                        event_type=new_event_type,
+                        start_datetime=start_datetime,
+                        end_datetime=end_datetime,
+                    )
+                    session.add(new_event)
+                    session.commit()
+
+                st.success(f"Event '{new_title}' added!")
+                st.rerun()
+
+    # Past Events section (collapsed)
+    with st.expander("Past Events"):
+        if not past_data:
+            st.info("No past events.")
+        else:
+            for event in past_data:
+                col_icon, col_info = st.columns([0.5, 9.5])
+
+                with col_icon:
+                    st.markdown(
+                        f"<div style='font-size:20px;opacity:0.6;'>"
+                        f"{get_event_icon(event['event_type'])}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                with col_info:
+                    st.markdown(f"**{event['title']}**")
+                    st.caption(
+                        format_event_datetime(
+                            event["start_datetime"],
+                            event["end_datetime"],
+                            display_tz,
+                        )
+                    )
+
 elif page == "Settings":
     st.header("Settings")
 
     from src.data.storage import (
+        DEFAULT_EVENT_TYPES,
         DEFAULT_RELIABILITY_THRESHOLD,
+        get_event_types,
         get_reliability_threshold,
         init_database,
+        set_event_types,
         set_reliability_threshold,
     )
 
@@ -3536,6 +3940,69 @@ elif page == "Settings":
             to qualify for a tier.
             """
         )
+
+    st.markdown("---")
+
+    # Event Types Section
+    st.subheader("Event Types")
+    st.markdown("Configure the available event types for alliance event scheduling.")
+
+    current_event_types = get_event_types()
+
+    # Display current event types with delete buttons
+    st.markdown("**Current Types:**")
+    types_to_delete = []
+
+    for i, event_type in enumerate(current_event_types):
+        col_type, col_delete = st.columns([4, 1])
+        with col_type:
+            st.text(event_type)
+        with col_delete:
+            if st.button("🗑", key=f"delete_type_{i}", help=f"Delete {event_type}"):
+                types_to_delete.append(event_type)
+
+    # Process deletions
+    if types_to_delete:
+        updated_types = [t for t in current_event_types if t not in types_to_delete]
+        if updated_types:
+            set_event_types(updated_types)
+            st.success(f"Removed: {', '.join(types_to_delete)}")
+            st.rerun()
+        else:
+            st.error("Cannot delete all event types. At least one type must remain.")
+
+    # Add new event type
+    st.markdown("**Add New Type:**")
+    col_add_input, col_add_btn = st.columns([3, 1])
+
+    with col_add_input:
+        new_type = st.text_input(
+            "New event type",
+            max_chars=50,
+            label_visibility="collapsed",
+            placeholder="Enter new event type...",
+        )
+
+    with col_add_btn:
+        if st.button("Add", type="primary", key="add_event_type"):
+            if new_type.strip():
+                if new_type.strip() in current_event_types:
+                    st.error("This event type already exists.")
+                else:
+                    updated_types = current_event_types + [new_type.strip()]
+                    set_event_types(updated_types)
+                    st.success(f"Added: {new_type.strip()}")
+                    st.rerun()
+            else:
+                st.error("Please enter an event type name.")
+
+    # Reset to defaults button
+    if current_event_types != DEFAULT_EVENT_TYPES:
+        st.markdown("")
+        if st.button("Reset to Defaults", type="secondary", key="reset_event_types"):
+            set_event_types(DEFAULT_EVENT_TYPES)
+            st.success("Event types reset to defaults.")
+            st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(
