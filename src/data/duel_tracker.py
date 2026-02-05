@@ -79,6 +79,24 @@ def calculate_reliability(
             return 0.0
 
         day_ids = [d.id for d in days]
+
+        # Filter out "empty" days where all active players have 0 points
+        # (indicates no data was imported for that day)
+        days_with_data = (
+            session.query(DuelDailyStats.day_id)
+            .join(Player, DuelDailyStats.player_id == Player.id)
+            .filter(
+                DuelDailyStats.day_id.in_(day_ids),
+                Player.is_active == True,  # noqa: E712
+                DuelDailyStats.points > 0,
+            )
+            .distinct()
+            .all()
+        )
+        days_with_data_ids = {d[0] for d in days_with_data}
+
+        # Only count days that have actual data
+        day_ids = [d for d in day_ids if d in days_with_data_ids]
         total_days = len(day_ids)
 
         # Get player's daily stats for these days
@@ -1338,6 +1356,9 @@ def get_rolling_report(
         week_ids = [w.id for w in recent_weeks]
         total_weeks = len(week_ids)
 
+        # Identify the current (most recent) week - first in list since ordered DESC
+        current_week_id = recent_weeks[0].id
+
         # Get threshold once for all players
         threshold = get_reliability_threshold(session=session)
 
@@ -1383,7 +1404,18 @@ def get_rolling_report(
                 continue
 
             avg_raw = sum(s.raw_points for s in stats) / weeks_participated
-            avg_normalized = sum(s.normalized_points for s in stats) / weeks_participated
+
+            # Calculate normalized points with fair adjustment for current week
+            total_normalized = 0.0
+            for s in stats:
+                if s.week_id == current_week_id and s.days_participated > 0:
+                    # Current week: use actual days participated for fair normalization
+                    total_normalized += s.raw_points / s.days_participated
+                else:
+                    # Completed weeks (or current with 0 days): use stored value
+                    total_normalized += s.normalized_points
+
+            avg_normalized = total_normalized / weeks_participated
             tier = assign_tier(avg_normalized, reliability)
 
             result.append(
