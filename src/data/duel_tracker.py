@@ -1779,8 +1779,17 @@ def get_current_week(session: Session | None = None) -> DuelWeek | None:
     return get_latest_week(session=session)
 
 
-def get_player_current_week_daily_points(player_id: int, session: Session | None = None) -> dict:
-    """Get a player's daily points for the current week.
+def get_player_current_week_daily_points(
+    player_id: int,
+    week_id: int | None = None,
+    session: Session | None = None,
+) -> dict:
+    """Get a player's daily points for a specific week or the current week.
+
+    Args:
+        player_id: The player's ID.
+        week_id: Optional specific week ID. If None, uses the latest week.
+        session: Optional SQLAlchemy session.
 
     Returns:
         {
@@ -1799,7 +1808,10 @@ def get_player_current_week_daily_points(player_id: int, session: Session | None
         session = get_session()
 
     try:
-        week = get_latest_week(session=session)
+        if week_id is not None:
+            week = get_week(week_id, session=session)
+        else:
+            week = get_latest_week(session=session)
         if not week:
             return {"error": "No weeks found"}
 
@@ -1989,9 +2001,14 @@ def get_all_players_cycle_theme_totals(
 
 
 def get_all_players_current_week_daily_points(
+    week_id: int | None = None,
     session: Session | None = None,
 ) -> dict[int, dict[int, float]]:
-    """Get current week daily points for all active players (for ranking).
+    """Get daily points for all active players for a specific week or the current week.
+
+    Args:
+        week_id: Optional specific week ID. If None, uses the latest week.
+        session: Optional SQLAlchemy session.
 
     Returns:
         Dict mapping player_id -> {day_number -> points}
@@ -2002,7 +2019,10 @@ def get_all_players_current_week_daily_points(
         session = get_session()
 
     try:
-        week = get_latest_week(session=session)
+        if week_id is not None:
+            week = get_week(week_id, session=session)
+        else:
+            week = get_latest_week(session=session)
         if not week:
             return {}
 

@@ -1213,13 +1213,13 @@ elif page == "Player Summary":
     st.markdown(render_section_header("Player Summary"), unsafe_allow_html=True)
 
     import pandas as pd
+    import plotly.graph_objects as go
 
     from src.data.duel_tracker import (
         TIER_THRESHOLDS,
+        get_all_cycles,
         get_all_players_current_week_daily_points,
         get_all_players_cycle_theme_totals,
-        get_current_cycle,
-        get_current_week,
         get_player_current_week_daily_points,
         get_player_cycle_theme_totals,
         get_recent_weeks,
@@ -1515,6 +1515,78 @@ elif page == "Player Summary":
                     "Enemy Buster": "Buster",
                 }
 
+                def calculate_alliance_daily_averages(all_players_data: dict) -> dict[int, float]:
+                    """Calculate mean points per day across all players who participated."""
+                    day_averages = {}
+                    for day_num in range(1, 7):
+                        day_points = [
+                            pdata[day_num]
+                            for pdata in all_players_data.values()
+                            if day_num in pdata
+                        ]
+                        day_averages[day_num] = (
+                            sum(day_points) / len(day_points) if day_points else 0
+                        )
+                    return day_averages
+
+                def create_daily_radar_chart(
+                    player_points: dict[int, dict],
+                    alliance_averages: dict[int, float],
+                ) -> go.Figure:
+                    """Create radar chart comparing player to alliance average."""
+                    categories = ["Radar", "Base", "Science", "Heroes", "Mobilize", "Buster"]
+
+                    # Extract player values (None -> 0)
+                    player_values = [
+                        (player_points.get(d, {}).get("points") or 0) for d in range(1, 7)
+                    ]
+                    alliance_values = [alliance_averages.get(d, 0) for d in range(1, 7)]
+
+                    # Close the shape
+                    categories_closed = categories + [categories[0]]
+                    player_closed = player_values + [player_values[0]]
+                    alliance_closed = alliance_values + [alliance_values[0]]
+
+                    fig = go.Figure()
+
+                    # Alliance average (behind)
+                    fig.add_trace(
+                        go.Scatterpolar(
+                            r=alliance_closed,
+                            theta=categories_closed,
+                            name="Alliance Avg",
+                            fill="toself",
+                            fillcolor="rgba(102, 126, 234, 0.15)",
+                            line=dict(color="#667eea", width=2, dash="dot"),
+                        )
+                    )
+
+                    # Player (on top)
+                    fig.add_trace(
+                        go.Scatterpolar(
+                            r=player_closed,
+                            theta=categories_closed,
+                            name="Player",
+                            fill="toself",
+                            fillcolor="rgba(118, 75, 162, 0.25)",
+                            line=dict(color="#764ba2", width=3),
+                        )
+                    )
+
+                    fig.update_layout(
+                        polar=dict(
+                            radialaxis=dict(visible=True, gridcolor="#2a2a4a"),
+                            angularaxis=dict(gridcolor="#2a2a4a"),
+                            bgcolor="#1e1e38",
+                        ),
+                        showlegend=True,
+                        legend=dict(orientation="h", y=-0.1, x=0.5, xanchor="center"),
+                        height=350,
+                        margin=dict(l=60, r=60, t=30, b=60),
+                        paper_bgcolor="rgba(0,0,0,0)",
+                    )
+                    return fig
+
                 def format_points(pts: float | None) -> str:
                     """Format points for display."""
                     if pts is None:
@@ -1548,149 +1620,237 @@ elif page == "Player Summary":
                     else:
                         return "#ef4444", "✗"  # red
 
-                # Get current week data
-                current_week = get_current_week()
-                current_week_data = get_player_current_week_daily_points(selected_player_id)
-                all_current_week = get_all_players_current_week_daily_points()
+                # Get available weeks and cycles for selectors
+                available_weeks = get_recent_weeks(count=8)
+                available_cycles = get_all_cycles()
 
-                # Get current cycle data
-                current_cycle = get_current_cycle()
-                cycle_data = None
-                all_cycle_totals = {}
-                if current_cycle:
-                    cycle_data = get_player_cycle_theme_totals(selected_player_id, current_cycle.id)
-                    all_cycle_totals = get_all_players_cycle_theme_totals(current_cycle.id)
+                has_weeks = bool(available_weeks)
+                has_cycles = bool(available_cycles)
 
-                has_current_week_data = (
-                    "error" not in current_week_data
-                    and current_week_data.get("days")
-                    and any(d["points"] is not None for d in current_week_data["days"].values())
-                )
-                has_cycle_data = (
-                    cycle_data
-                    and "error" not in cycle_data
-                    and cycle_data.get("day_totals")
-                    and any(d["times_participated"] > 0 for d in cycle_data["day_totals"].values())
-                )
+                if has_weeks or has_cycles:
+                    # === Tabbed interface for Weekly vs 4-Week Cycle ===
+                    weekly_tab, cycle_tab = st.tabs(["Weekly", "4-Week Cycle"])
 
-                if has_current_week_data or has_cycle_data:
-                    # === Current Week Section ===
-                    if has_current_week_data:
-                        week_num = current_week_data.get("week_number", "?")
-                        st.markdown(f"**Current Week (Week {week_num})**")
+                    with weekly_tab:
+                        if has_weeks:
+                            # Week selector dropdown
+                            week_options = {
+                                f"Week {w.week_number}"
+                                + (f": vs {w.opponent_name}" if w.opponent_name else ""): w.id
+                                for w in available_weeks
+                            }
+                            selected_week_label = st.selectbox(
+                                "Select Week",
+                                list(week_options.keys()),
+                                key="radar_week_select",
+                            )
+                            selected_week_id = week_options[selected_week_label]
 
-                        # Build HTML day-perf-grid
-                        day_boxes_html = ""
-                        for day_num in range(1, 7):
-                            day_info = current_week_data["days"].get(day_num, {})
-                            theme = day_info.get("theme", f"Day {day_num}")
-                            points = day_info.get("points")
-                            display_theme = short_themes.get(theme, theme)
-                            pts_str = format_points(points)
-
-                            rank_html = ""
-                            color_class = ""
-                            if points is not None:
-                                day_scores = []
-                                for pid, pdata in all_current_week.items():
-                                    if day_num in pdata:
-                                        day_scores.append((pid, pdata[day_num]))
-                                day_scores.sort(key=lambda x: x[1], reverse=True)
-                                total_players = len(day_scores)
-                                rank = None
-                                for idx_r, (pid, _) in enumerate(day_scores):
-                                    if pid == selected_player_id:
-                                        rank = idx_r + 1
-                                        break
-
-                                status_color, status_icon = get_status_color_icon(points)
-                                rank_str = get_rank_str(rank, total_players)
-                                rank_html = (
-                                    f'<div style="font-size:11px;color:{status_color};'
-                                    f'margin-top:4px;">{status_icon}{rank_str}</div>'
-                                )
-                                if points >= 7_200_000:
-                                    color_class = "green"
-                                elif points >= 3_600_000:
-                                    color_class = "amber"
-                                else:
-                                    color_class = "red"
-                            else:
-                                pts_str = "--"
-
-                            day_boxes_html += (
-                                f'<div class="day-box">'
-                                f'<div class="day-label">{display_theme}</div>'
-                                f'<div class="day-value {color_class}">{pts_str}</div>'
-                                f"{rank_html}</div>"
+                            # Fetch data for selected week
+                            week_data = get_player_current_week_daily_points(
+                                selected_player_id, week_id=selected_week_id
+                            )
+                            all_week_data = get_all_players_current_week_daily_points(
+                                week_id=selected_week_id
                             )
 
-                        st.markdown(
-                            f'<div class="day-perf-grid">{day_boxes_html}</div>',
-                            unsafe_allow_html=True,
-                        )
-                        st.markdown("")  # Spacer
-
-                    # === Cycle Total Section ===
-                    if has_cycle_data:
-                        cycle_num = cycle_data.get("cycle_number", "?")
-                        weeks_in_cycle = cycle_data.get("weeks_in_cycle", 0)
-                        st.markdown(f"**Cycle Total (Cycle {cycle_num})**")
-
-                        # Build HTML day-perf-grid for cycle totals
-                        cycle_boxes_html = ""
-                        for day_num in range(1, 7):
-                            day_info = cycle_data["day_totals"].get(day_num, {})
-                            theme = day_info.get("theme", f"Day {day_num}")
-                            total_pts = day_info.get("total_points", 0)
-                            times_participated = day_info.get("times_participated", 0)
-                            display_theme = short_themes.get(theme, theme)
-                            pts_str = format_points(total_pts)
-
-                            rank_html = ""
-                            color_class = ""
-                            if times_participated > 0:
-                                day_scores = []
-                                for pid, pdata in all_cycle_totals.items():
-                                    if day_num in pdata:
-                                        day_scores.append((pid, pdata[day_num]))
-                                day_scores.sort(key=lambda x: x[1], reverse=True)
-                                total_players = len(day_scores)
-                                rank = None
-                                for idx_r, (pid, _) in enumerate(day_scores):
-                                    if pid == selected_player_id:
-                                        rank = idx_r + 1
-                                        break
-
-                                status_color, status_icon = get_status_color_icon(total_pts)
-                                rank_str = get_rank_str(rank, total_players)
-                                wks_txt = f"{times_participated}/{weeks_in_cycle} wks"
-                                rank_html = (
-                                    f'<div style="font-size:11px;color:{status_color};'
-                                    f'margin-top:4px;">{status_icon}{rank_str}</div>'
-                                    f'<div style="font-size:10px;color:#6b7280;'
-                                    f'margin-top:2px;">{wks_txt}</div>'
+                            has_week_data = (
+                                "error" not in week_data
+                                and week_data.get("days")
+                                and any(
+                                    d["points"] is not None for d in week_data["days"].values()
                                 )
-                                if total_pts >= 7_200_000:
-                                    color_class = "green"
-                                elif total_pts >= 3_600_000:
-                                    color_class = "amber"
-                                else:
-                                    color_class = "red"
-                            else:
-                                pts_str = "--"
-
-                            cycle_boxes_html += (
-                                f'<div class="day-box">'
-                                f'<div class="day-label">{display_theme}</div>'
-                                f'<div class="day-value {color_class}">{pts_str}</div>'
-                                f"{rank_html}</div>"
                             )
 
-                        st.markdown(
-                            f'<div class="day-perf-grid">{cycle_boxes_html}</div>',
-                            unsafe_allow_html=True,
-                        )
+                            if has_week_data:
+                                # Radar chart: Player vs Alliance Average
+                                alliance_avgs = calculate_alliance_daily_averages(all_week_data)
+                                radar_fig = create_daily_radar_chart(
+                                    week_data["days"], alliance_avgs
+                                )
+                                st.plotly_chart(radar_fig, use_container_width=True)
+
+                                # Build HTML day-perf-grid
+                                day_boxes_html = ""
+                                for day_num in range(1, 7):
+                                    day_info = week_data["days"].get(day_num, {})
+                                    theme = day_info.get("theme", f"Day {day_num}")
+                                    points = day_info.get("points")
+                                    display_theme = short_themes.get(theme, theme)
+                                    pts_str = format_points(points)
+
+                                    rank_html = ""
+                                    color_class = ""
+                                    if points is not None:
+                                        day_scores = []
+                                        for pid, pdata in all_week_data.items():
+                                            if day_num in pdata:
+                                                day_scores.append((pid, pdata[day_num]))
+                                        day_scores.sort(key=lambda x: x[1], reverse=True)
+                                        total_players = len(day_scores)
+                                        rank = None
+                                        for idx_r, (pid, _) in enumerate(day_scores):
+                                            if pid == selected_player_id:
+                                                rank = idx_r + 1
+                                                break
+
+                                        status_color, status_icon = get_status_color_icon(points)
+                                        rank_str = get_rank_str(rank, total_players)
+                                        rank_html = (
+                                            f'<div style="font-size:11px;color:{status_color};'
+                                            f'margin-top:4px;">{status_icon}{rank_str}</div>'
+                                        )
+                                        if points >= 7_200_000:
+                                            color_class = "green"
+                                        elif points >= 3_600_000:
+                                            color_class = "amber"
+                                        else:
+                                            color_class = "red"
+                                    else:
+                                        pts_str = "--"
+
+                                    day_boxes_html += (
+                                        f'<div class="day-box">'
+                                        f'<div class="day-label">{display_theme}</div>'
+                                        f'<div class="day-value {color_class}">{pts_str}</div>'
+                                        f"{rank_html}</div>"
+                                    )
+
+                                st.markdown(
+                                    f'<div class="day-perf-grid">{day_boxes_html}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                            else:
+                                st.info("No data for selected week.")
+                        else:
+                            st.info("No weeks recorded yet.")
+
+                    with cycle_tab:
+                        if has_cycles:
+                            # Cycle selector dropdown
+                            cycle_options = {
+                                f"Cycle {c.cycle_number}"
+                                + (f": {c.name}" if c.name else ""): c.id
+                                for c in available_cycles
+                            }
+                            selected_cycle_label = st.selectbox(
+                                "Select Cycle",
+                                list(cycle_options.keys()),
+                                key="radar_cycle_select",
+                            )
+                            selected_cycle_id = cycle_options[selected_cycle_label]
+
+                            # Fetch cycle data
+                            cycle_data = get_player_cycle_theme_totals(
+                                selected_player_id, selected_cycle_id
+                            )
+                            all_cycle_totals = get_all_players_cycle_theme_totals(
+                                selected_cycle_id
+                            )
+
+                            has_cycle_data = (
+                                cycle_data
+                                and "error" not in cycle_data
+                                and cycle_data.get("day_totals")
+                                and any(
+                                    d["times_participated"] > 0
+                                    for d in cycle_data["day_totals"].values()
+                                )
+                            )
+
+                            if has_cycle_data:
+                                cycle_num = cycle_data.get("cycle_number", "?")
+                                weeks_in_cycle = cycle_data.get("weeks_in_cycle", 0)
+
+                                # Build radar chart data from cycle totals
+                                cycle_days_for_radar = {}
+                                for day_num in range(1, 7):
+                                    day_info = cycle_data["day_totals"].get(day_num, {})
+                                    cycle_days_for_radar[day_num] = {
+                                        "theme": day_info.get("theme", f"Day {day_num}"),
+                                        "points": day_info.get("total_points", 0)
+                                        if day_info.get("times_participated", 0) > 0
+                                        else None,
+                                    }
+
+                                # Calculate alliance averages for cycle
+                                cycle_alliance_avgs = {}
+                                for day_num in range(1, 7):
+                                    day_totals = [
+                                        pdata.get(day_num, 0)
+                                        for pdata in all_cycle_totals.values()
+                                        if day_num in pdata
+                                    ]
+                                    cycle_alliance_avgs[day_num] = (
+                                        sum(day_totals) / len(day_totals) if day_totals else 0
+                                    )
+
+                                # Radar chart for cycle
+                                radar_fig = create_daily_radar_chart(
+                                    cycle_days_for_radar, cycle_alliance_avgs
+                                )
+                                st.plotly_chart(radar_fig, use_container_width=True)
+
+                                # Build HTML day-perf-grid for cycle totals
+                                cycle_boxes_html = ""
+                                for day_num in range(1, 7):
+                                    day_info = cycle_data["day_totals"].get(day_num, {})
+                                    theme = day_info.get("theme", f"Day {day_num}")
+                                    total_pts = day_info.get("total_points", 0)
+                                    times_participated = day_info.get("times_participated", 0)
+                                    display_theme = short_themes.get(theme, theme)
+                                    pts_str = format_points(total_pts)
+
+                                    rank_html = ""
+                                    color_class = ""
+                                    if times_participated > 0:
+                                        day_scores = []
+                                        for pid, pdata in all_cycle_totals.items():
+                                            if day_num in pdata:
+                                                day_scores.append((pid, pdata[day_num]))
+                                        day_scores.sort(key=lambda x: x[1], reverse=True)
+                                        total_players = len(day_scores)
+                                        rank = None
+                                        for idx_r, (pid, _) in enumerate(day_scores):
+                                            if pid == selected_player_id:
+                                                rank = idx_r + 1
+                                                break
+
+                                        status_color, status_icon = get_status_color_icon(
+                                            total_pts
+                                        )
+                                        rank_str = get_rank_str(rank, total_players)
+                                        wks_txt = f"{times_participated}/{weeks_in_cycle} wks"
+                                        rank_html = (
+                                            f'<div style="font-size:11px;color:{status_color};'
+                                            f'margin-top:4px;">{status_icon}{rank_str}</div>'
+                                            f'<div style="font-size:10px;color:#6b7280;'
+                                            f'margin-top:2px;">{wks_txt}</div>'
+                                        )
+                                        if total_pts >= 7_200_000:
+                                            color_class = "green"
+                                        elif total_pts >= 3_600_000:
+                                            color_class = "amber"
+                                        else:
+                                            color_class = "red"
+                                    else:
+                                        pts_str = "--"
+
+                                    cycle_boxes_html += (
+                                        f'<div class="day-box">'
+                                        f'<div class="day-label">{display_theme}</div>'
+                                        f'<div class="day-value {color_class}">{pts_str}</div>'
+                                        f"{rank_html}</div>"
+                                    )
+
+                                st.markdown(
+                                    f'<div class="day-perf-grid">{cycle_boxes_html}</div>',
+                                    unsafe_allow_html=True,
+                                )
+                            else:
+                                st.info("No cycle data available for selected cycle.")
+                        else:
+                            st.info("No cycles recorded yet.")
                 else:
                     st.info("No daily performance data available.")
 
@@ -1755,20 +1915,57 @@ elif page == "Player Summary":
                     generate_player_card_gif,
                     generate_player_card_png,
                 )
+                from src.data.duel_tracker import get_current_cycle
 
-                # Build card data from existing variables
+                # Fetch current week and cycle data for export
+                # (uses latest week regardless of selector choice)
+                export_current_week_data_raw = get_player_current_week_daily_points(
+                    selected_player_id
+                )
+                export_all_current_week = get_all_players_current_week_daily_points()
+
+                export_current_cycle = get_current_cycle()
+                export_cycle_data_raw = None
+                export_all_cycle_totals = {}
+                if export_current_cycle:
+                    export_cycle_data_raw = get_player_cycle_theme_totals(
+                        selected_player_id, export_current_cycle.id
+                    )
+                    export_all_cycle_totals = get_all_players_cycle_theme_totals(
+                        export_current_cycle.id
+                    )
+
+                has_export_week_data = (
+                    "error" not in export_current_week_data_raw
+                    and export_current_week_data_raw.get("days")
+                    and any(
+                        d["points"] is not None
+                        for d in export_current_week_data_raw["days"].values()
+                    )
+                )
+                has_export_cycle_data = (
+                    export_cycle_data_raw
+                    and "error" not in export_cycle_data_raw
+                    and export_cycle_data_raw.get("day_totals")
+                    and any(
+                        d["times_participated"] > 0
+                        for d in export_cycle_data_raw["day_totals"].values()
+                    )
+                )
+
+                # Build card data from fetched variables
                 # Prepare current week data with ranks
                 export_current_week_data = {}
-                if has_current_week_data:
+                if has_export_week_data:
                     export_days = {}
                     for day_num in range(1, 7):
-                        day_info = current_week_data["days"].get(day_num, {})
+                        day_info = export_current_week_data_raw["days"].get(day_num, {})
                         points = day_info.get("points")
                         rank = None
                         total_players = 0
                         if points is not None:
                             day_scores = []
-                            for pid, pdata in all_current_week.items():
+                            for pid, pdata in export_all_current_week.items():
                                 if day_num in pdata:
                                     day_scores.append((pid, pdata[day_num]))
                             day_scores.sort(key=lambda x: x[1], reverse=True)
@@ -1784,23 +1981,23 @@ elif page == "Player Summary":
                             "total": total_players,
                         }
                     export_current_week_data = {
-                        "week_number": current_week_data.get("week_number", "?"),
+                        "week_number": export_current_week_data_raw.get("week_number", "?"),
                         "days": export_days,
                     }
 
                 # Prepare cycle data with ranks
                 export_cycle_data = None
-                if has_cycle_data:
+                if has_export_cycle_data:
                     export_day_totals = {}
                     for day_num in range(1, 7):
-                        day_info = cycle_data["day_totals"].get(day_num, {})
+                        day_info = export_cycle_data_raw["day_totals"].get(day_num, {})
                         total_pts = day_info.get("total_points", 0)
                         times_participated = day_info.get("times_participated", 0)
                         rank = None
                         total_players = 0
                         if times_participated > 0:
                             day_scores = []
-                            for pid, pdata in all_cycle_totals.items():
+                            for pid, pdata in export_all_cycle_totals.items():
                                 if day_num in pdata:
                                     day_scores.append((pid, pdata[day_num]))
                             day_scores.sort(key=lambda x: x[1], reverse=True)
@@ -1817,8 +2014,8 @@ elif page == "Player Summary":
                             "total_players": total_players,
                         }
                     export_cycle_data = {
-                        "cycle_number": cycle_data.get("cycle_number", "?"),
-                        "weeks_in_cycle": cycle_data.get("weeks_in_cycle", 0),
+                        "cycle_number": export_cycle_data_raw.get("cycle_number", "?"),
+                        "weeks_in_cycle": export_cycle_data_raw.get("weeks_in_cycle", 0),
                         "day_totals": export_day_totals,
                     }
 
