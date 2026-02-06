@@ -651,7 +651,7 @@ if page == "Overview":
     init_database()
 
     # --- Upcoming Events Summary ---
-    from datetime import timedelta
+    from datetime import date, time, timedelta
 
     # Timezone options for overview
     OVERVIEW_TZ_OPTIONS = {
@@ -685,11 +685,11 @@ if page == "Overview":
 
     try:
         with get_session() as session:
-            now = datetime.now()
-            week_ahead = now + timedelta(days=7)
+            today_start = datetime.combine(date.today(), time.min)
+            week_ahead = today_start + timedelta(days=7)
             upcoming_events = (
                 session.query(AllianceEvent)
-                .filter(AllianceEvent.start_datetime >= now)
+                .filter(AllianceEvent.start_datetime >= today_start)
                 .filter(AllianceEvent.start_datetime <= week_ahead)
                 .order_by(AllianceEvent.start_datetime)
                 .all()
@@ -3789,11 +3789,86 @@ elif page == "War Results":
     st.text("No war results recorded yet.")
 
 elif page == "Analytics":
-    st.header("Analytics")
-    st.info("Charts and analytics will be displayed here once data is available.")
+    import pandas as pd
+    from sqlalchemy import func as sql_func
 
-    st.subheader("Performance Trends")
-    st.text("Add war results to see analytics.")
+    from src.data.models import KillHistory, KillImport, Player
+    from src.data.storage import get_session, init_database
+
+    init_database()
+
+    st.header("Analytics")
+
+    # --- Kill Count Report ---
+    with get_session() as session:
+        # Get the most recent import date for the subtitle
+        last_import = session.query(sql_func.max(KillImport.recorded_at)).scalar()
+
+        # Get active players with kill counts
+        active_players = (
+            session.query(Player).filter(Player.is_active.is_(True)).all()
+        )
+
+        # Subquery: first recorded_at per player
+        first_record_subq = (
+            session.query(
+                KillHistory.player_id,
+                sql_func.min(KillHistory.recorded_at).label("first_date"),
+            )
+            .group_by(KillHistory.player_id)
+            .subquery()
+        )
+
+        # Get the first kill count for each player
+        first_kills = (
+            session.query(KillHistory.player_id, KillHistory.kill_count)
+            .join(
+                first_record_subq,
+                (KillHistory.player_id == first_record_subq.c.player_id)
+                & (KillHistory.recorded_at == first_record_subq.c.first_date),
+            )
+            .all()
+        )
+        first_kills_map = {row.player_id: row.kill_count for row in first_kills}
+
+        # Build table rows
+        rows = []
+        for player in active_players:
+            first_kc = first_kills_map.get(player.id)
+            change = (player.kill_count - first_kc) if first_kc is not None else None
+            rows.append(
+                {
+                    "Player": player.name,
+                    "Current Kill Count": player.kill_count,
+                    "Change": change,
+                }
+            )
+
+    if last_import:
+        subtitle = f"Last updated: {last_import.strftime('%Y-%m-%d')}"
+    else:
+        subtitle = "No kill data imported yet"
+    st.subheader("Kill Count")
+    st.caption(subtitle)
+
+    if rows:
+        df = pd.DataFrame(rows).sort_values(
+            "Current Kill Count", ascending=False, ignore_index=True
+        )
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Player": st.column_config.TextColumn("Player"),
+                "Current Kill Count": st.column_config.NumberColumn(
+                    "Current Kill Count", format="%d"
+                ),
+                "Change": st.column_config.NumberColumn("Change", format="%d"),
+            },
+        )
+    else:
+        st.info("No active players with kill data found.")
 
 elif page == "Events":
     from datetime import date, datetime, time
@@ -3874,16 +3949,16 @@ elif page == "Events":
 
     # Get events from database
     with get_session() as session:
-        now = datetime.now()
+        today_start = datetime.combine(date.today(), time.min)
         upcoming_events = (
             session.query(AllianceEvent)
-            .filter(AllianceEvent.start_datetime >= now)
+            .filter(AllianceEvent.start_datetime >= today_start)
             .order_by(AllianceEvent.start_datetime)
             .all()
         )
         past_events = (
             session.query(AllianceEvent)
-            .filter(AllianceEvent.start_datetime < now)
+            .filter(AllianceEvent.start_datetime < today_start)
             .order_by(AllianceEvent.start_datetime.desc())
             .limit(20)
             .all()
