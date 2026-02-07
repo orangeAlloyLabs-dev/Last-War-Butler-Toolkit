@@ -658,6 +658,7 @@ if page == "Overview":
         "EST": "America/New_York",
         "BRT": "America/Sao_Paulo",
         "KST": "Asia/Seoul",
+        "AST": "Asia/Riyadh",
     }
 
     # Header with timezone selector
@@ -3891,6 +3892,7 @@ elif page == "Events":
         "GMT": "Europe/London",
         "BRT": "America/Sao_Paulo",
         "KST": "Asia/Seoul",
+        "AST": "Asia/Riyadh",
     }
 
     # Event type icons for display
